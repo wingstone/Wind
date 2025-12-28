@@ -4,6 +4,7 @@
 #include "CombatStateTreeUtility.h"
 #include "StateTreeExecutionContext.h"
 #include "StateTreeExecutionTypes.h"
+#include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "AIController.h"
@@ -25,6 +26,40 @@ bool FStateTreeCharacterGroundedCondition::TestCondition(FStateTreeExecutionCont
 FText FStateTreeCharacterGroundedCondition::GetDescription(const FGuid& ID, FStateTreeDataView InstanceDataView, const IStateTreeBindingLookup& BindingLookup, EStateTreeNodeFormatting Formatting /*= EStateTreeNodeFormatting::Text*/) const
 {
 	return FText::FromString("<b>Is Character Grounded</b>");
+}
+#endif // WITH_EDITOR
+
+////////////////////////////////////////////////////////////////////
+
+bool FStateTreeIsInDangerCondition::TestCondition(FStateTreeExecutionContext& Context) const
+{
+	const FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+
+	// ensure we have a valid enemy character
+	if (InstanceData.Character)
+	{
+		// is the last detected danger event within the reaction threshold?
+		const float ReactionDelta = InstanceData.Character->GetWorld()->GetTimeSeconds() - InstanceData.Character->GetLastDangerTime();
+
+		if (ReactionDelta < InstanceData.MaxReactionTime && ReactionDelta > InstanceData.MinReactionTime)
+		{
+			// do a dot product check to determine if the danger location is within the character's detection cone
+			const FVector DangerDir = (InstanceData.Character->GetLastDangerLocation() - InstanceData.Character->GetActorLocation()).GetSafeNormal2D();
+
+			const float DangerDot = FVector::DotProduct(DangerDir, InstanceData.Character->GetActorForwardVector());
+			const float ConeAngleCos = FMath::Cos(FMath::DegreesToRadians(InstanceData.DangerSightConeAngle));
+
+			return DangerDot > ConeAngleCos;
+		}
+	}
+
+	return false;
+}
+
+#if WITH_EDITOR
+FText FStateTreeIsInDangerCondition::GetDescription(const FGuid& ID, FStateTreeDataView InstanceDataView, const IStateTreeBindingLookup& BindingLookup, EStateTreeNodeFormatting Formatting /*= EStateTreeNodeFormatting::Text*/) const
+{
+	return FText::FromString("<b>Is Character In Danger</b>");
 }
 #endif // WITH_EDITOR
 
@@ -92,7 +127,7 @@ EStateTreeRunStatus FStateTreeChargedAttackTask::EnterState(FStateTreeExecutionC
 			}
 		);
 
-		// tell the character to do a combo attack
+		// tell the character to do a charged attack
 		InstanceData.Character->DoAIChargedAttack();
 	}
 
@@ -149,7 +184,7 @@ void FStateTreeWaitForLandingTask::ExitState(FStateTreeExecutionContext& Context
 		// get the instance data
 		FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
 
-		// bind the on enemy landed delegate
+		// unbind the on enemy landed delegate
 		InstanceData.Character->OnEnemyLanded.Unbind();
 	}
 }

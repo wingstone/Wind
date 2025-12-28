@@ -113,6 +113,16 @@ void ACombatEnemy::AttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 	OnAttackCompleted.ExecuteIfBound();
 }
 
+const FVector& ACombatEnemy::GetLastDangerLocation() const
+{
+	return LastDangerLocation;
+}
+
+float ACombatEnemy::GetLastDangerTime() const
+{
+	return LastDangerTime;
+}
+
 void ACombatEnemy::DoAttackTrace(FName DamageSourceBone)
 {
 	// sweep for objects in front of the character to be hit by the attack
@@ -243,6 +253,17 @@ void ACombatEnemy::HandleDeath()
 void ACombatEnemy::ApplyHealing(float Healing, AActor* Healer)
 {
 	// stub
+}
+
+void ACombatEnemy::NotifyDanger(const FVector& DangerLocation, AActor* DangerSource)
+{
+	// ensure we're being attacked by the player
+	if (DangerSource && DangerSource->ActorHasTag(FName("Player")))
+	{
+		// save the danger location and game time
+		LastDangerLocation = DangerLocation;
+		LastDangerTime = GetWorld()->GetTimeSeconds();
+	}
 }
 
 void ACombatEnemy::RemoveFromLevel()

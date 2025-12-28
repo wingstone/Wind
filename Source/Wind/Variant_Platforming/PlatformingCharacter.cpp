@@ -4,6 +4,7 @@
 #include "PlatformingCharacter.h"
 
 #include "Components/CapsuleComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -23,7 +24,7 @@ APlatformingCharacter::APlatformingCharacter()
 	bHasDashed = false;
 	bIsDashing = false;
 
-	// bind the attack montage ended delegate
+	// bind the dash montage ended delegate
 	OnDashMontageEnded.BindUObject(this, &APlatformingCharacter::DashMontageEnded);
 
 	// enable press and hold jump
@@ -277,11 +278,8 @@ void APlatformingCharacter::DoJumpEnd()
 
 void APlatformingCharacter::DashMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	// if the montage was interrupted, end the dash
-	if (bInterrupted)
-	{
-		EndDash();
-	}
+	// end the dash
+	EndDash();
 }
 
 void APlatformingCharacter::EndDash()

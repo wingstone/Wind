@@ -59,6 +59,60 @@ struct FStateTreeCharacterGroundedCondition : public FStateTreeConditionCommonBa
 ////////////////////////////////////////////////////////////////////
 
 /**
+ *  Instance data struct for the FStateTreeIsInDangerCondition condition
+ */
+USTRUCT()
+struct FStateTreeIsInDangerConditionInstanceData
+{
+	GENERATED_BODY()
+	
+	/** Character to check danger status on */
+	UPROPERTY(EditAnywhere, Category = "Context")
+	ACombatEnemy* Character;
+
+	/** Minimum time to wait before reacting to the danger event */
+	UPROPERTY(EditAnywhere, Category = "Parameters", meta = (Units = "s"))
+	float MinReactionTime = 0.35f;
+
+	/** Maximum time to wait before ignoring the danger event */
+	UPROPERTY(EditAnywhere, Category = "Parameters", meta = (Units = "s"))
+	float MaxReactionTime = 0.75f;
+
+	/** Line of sight half angle for detecting incoming danger, in degrees*/
+	UPROPERTY(EditAnywhere, Category = "Parameters", meta = (Units = "degrees"))
+	float DangerSightConeAngle = 120.0f;
+};
+STATETREE_POD_INSTANCEDATA(FStateTreeIsInDangerConditionInstanceData);
+
+/**
+ *  StateTree condition to check if the character is about to be hit by an attack
+ */
+USTRUCT(DisplayName = "Character is in Danger")
+struct FStateTreeIsInDangerCondition : public FStateTreeConditionCommonBase
+{
+	GENERATED_BODY()
+
+	/** Set the instance data type */
+	using FInstanceDataType = FStateTreeIsInDangerConditionInstanceData;
+	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+
+	/** Default constructor */
+	FStateTreeIsInDangerCondition() = default;
+	
+	/** Tests the StateTree condition */
+	virtual bool TestCondition(FStateTreeExecutionContext& Context) const override;
+
+#if WITH_EDITOR
+
+	/** Provides the description string */
+	virtual FText GetDescription(const FGuid& ID, FStateTreeDataView InstanceDataView, const IStateTreeBindingLookup& BindingLookup, EStateTreeNodeFormatting Formatting = EStateTreeNodeFormatting::Text) const override;
+#endif
+
+};
+
+////////////////////////////////////////////////////////////////////
+
+/**
  *  Instance data struct for the Combat StateTree tasks
  */
 USTRUCT()
