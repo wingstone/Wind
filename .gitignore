@@ -1,5 +1,8 @@
-# Visual Studio 2015 user specific files
+# Hide specific files
 .vs/
+.git/
+.github/
+.vscode/
 
 # Compiled Object files
 *.slo
