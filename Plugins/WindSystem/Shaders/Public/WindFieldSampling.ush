@@ -1,0 +1,83 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+//
+// WindFieldSampling.ush — Public sampling interface for materials and Niagara.
+//
+// Usage in a Material Custom Expression:
+//   #include "/Plugin/WindSystem/Public/WindFieldSampling.ush"
+//   return SampleWindField(WorldPosition, WindFieldTexture, WindFieldSampler, FieldOrigin, FieldExtent);
+//
+
+#pragma once
+
+/**
+ * Sample the 3D wind field texture at a given world position.
+ *
+ * @param WorldPosition  World-space position to sample (cm)
+ * @param WindField      Texture3D containing wind velocity data
+ * @param WindSampler    Trilinear clamp sampler
+ * @param FieldOrigin    World-space origin (min corner) of the wind field volume
+ * @param FieldExtent    World-space extent of the wind field volume
+ * @return float4: xyz = wind velocity (cm/s), w = turbulence intensity
+ */
+float4 SampleWindFieldRaw(
+	float3 WorldPosition,
+	Texture3D WindField,
+	SamplerState WindSampler,
+	float3 FieldOrigin,
+	float3 FieldExtent)
+{
+	float3 UVW = saturate((WorldPosition - FieldOrigin) / max(FieldExtent, 0.001));
+	return WindField.SampleLevel(WindSampler, UVW, 0);
+}
+
+/**
+ * Sample wind velocity at a world position.
+ * Returns the wind velocity vector (cm/s).
+ */
+float3 SampleWindVelocity(
+	float3 WorldPosition,
+	Texture3D WindField,
+	SamplerState WindSampler,
+	float3 FieldOrigin,
+	float3 FieldExtent)
+{
+	return SampleWindFieldRaw(WorldPosition, WindField, WindSampler, FieldOrigin, FieldExtent).xyz;
+}
+
+/**
+ * Compute a simple World Position Offset for vegetation/foliage.
+ *
+ * @param WorldPosition  Vertex world position
+ * @param WindField      Wind field 3D texture
+ * @param WindSampler    Trilinear clamp sampler
+ * @param FieldOrigin    Wind field origin
+ * @param FieldExtent    Wind field extent
+ * @param BendStrength   How much the vertex is affected by wind (0-1, higher at tips)
+ * @param Phase          Per-instance phase offset for variation
+ * @return float3 world position offset to apply
+ */
+float3 ComputeWindWPO(
+	float3 WorldPosition,
+	Texture3D WindField,
+	SamplerState WindSampler,
+	float3 FieldOrigin,
+	float3 FieldExtent,
+	float BendStrength,
+	float Phase)
+{
+	float4 WindSample = SampleWindFieldRaw(WorldPosition, WindField, WindSampler, FieldOrigin, FieldExtent);
+	float3 WindVelocity = WindSample.xyz;
+	float  Turbulence = WindSample.w;
+
+	// Scale wind velocity to displacement
+	float WindMagnitude = length(WindVelocity);
+	float3 WindDir = WindMagnitude > 0.001 ? WindVelocity / WindMagnitude : float3(0, 0, 0);
+
+	// Bend amount based on wind strength and bend factor
+	float BendAmount = WindMagnitude * BendStrength * 0.01; // scale from cm/s to reasonable offset
+
+	// Add per-instance variation using turbulence and phase
+	BendAmount *= (1.0 + Turbulence * sin(Phase) * 0.3);
+
+	return WindDir * BendAmount;
+}

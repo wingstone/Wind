@@ -1,0 +1,92 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+//
+// WindFieldCompute.usf — Compute shader that generates a 3D wind velocity field.
+//
+// Dispatch: (ResolutionX/8, ResolutionY/8, ResolutionZ/8) thread groups
+// Each thread computes one texel of the 3D wind field volume.
+// Output: float4(WindVelocity.xyz, Turbulence)
+
+#include "/Engine/Private/Common.ush"
+#include "WindFieldCommon.ush"
+
+// ============================================================================
+// Shader parameters (bound from C++ via FWindFieldComputeCS::FParameters)
+// ============================================================================
+
+// Volume parameters
+float3 FieldOrigin;    // World-space origin (minimum corner) of the wind field
+float  Time;           // World time in seconds
+float3 FieldExtent;    // World-space size of the wind field volume
+uint   SourceCount;    // Number of active wind sources
+uint   ResolutionX;    // Texel count X
+uint   ResolutionY;    // Texel count Y
+uint   ResolutionZ;    // Texel count Z
+
+// Wind source data
+StructuredBuffer<FGPUWindSource> WindSources;
+
+// Output 3D wind field texture
+RWTexture3D<float4> WindFieldOutput;
+
+// ============================================================================
+// Main compute kernel
+// ============================================================================
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 8
+#endif
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, THREADGROUP_SIZE)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Bounds check
+	if (DispatchThreadId.x >= ResolutionX ||
+	    DispatchThreadId.y >= ResolutionY ||
+	    DispatchThreadId.z >= ResolutionZ)
+	{
+		return;
+	}
+
+	// Compute world position for this texel
+	float3 UVW = (float3(DispatchThreadId) + 0.5) / float3(ResolutionX, ResolutionY, ResolutionZ);
+	float3 WorldPos = FieldOrigin + UVW * FieldExtent;
+
+	// Accumulate wind from all sources
+	float3 TotalWind = float3(0, 0, 0);
+	float  TotalTurbulence = 0;
+
+	for (uint i = 0; i < SourceCount; i++)
+	{
+		FGPUWindSource Source = WindSources[i];
+		float3 WindContribution = float3(0, 0, 0);
+
+		// Dispatch by wind type
+		if (Source.WindType == WIND_TYPE_DIRECTIONAL)
+		{
+			WindContribution = ComputeDirectionalWind(Source, WorldPos, Time);
+		}
+		else if (Source.WindType == WIND_TYPE_POINT)
+		{
+			WindContribution = ComputePointWind(Source, WorldPos, Time);
+		}
+		else if (Source.WindType == WIND_TYPE_VORTEX)
+		{
+			WindContribution = ComputeVortexWind(Source, WorldPos, Time);
+		}
+
+		// Add curl-noise turbulence per source
+		if (Source.NoiseStrength > 0)
+		{
+			float3 NoisePos = WorldPos * Source.NoiseFrequency * 0.01 + Time * 0.5;
+			float3 NoiseTurbulence = CurlNoise(NoisePos) * Source.NoiseStrength;
+			float WindMag = length(WindContribution);
+			WindContribution += NoiseTurbulence * max(WindMag, 1.0);
+			TotalTurbulence += Source.NoiseStrength * WindMag;
+		}
+
+		TotalWind += WindContribution;
+	}
+
+	// Write result: xyz = wind velocity (cm/s), w = turbulence intensity
+	WindFieldOutput[DispatchThreadId] = float4(TotalWind, TotalTurbulence);
+}

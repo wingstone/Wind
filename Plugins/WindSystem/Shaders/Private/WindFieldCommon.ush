@@ -1,0 +1,144 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+//
+// WindFieldCommon.ush — Shared types and utility functions for the wind field system.
+// Included by the compute shader and the material sampling function.
+
+#pragma once
+
+// ============================================================================
+// GPU wind source structure — must match C++ FGPUWindSourceData exactly (64 bytes)
+// ============================================================================
+struct FGPUWindSource
+{
+	float3 Position;          // 12 bytes  offset 0
+	float  Strength;          //  4 bytes  offset 12
+	float3 Direction;         // 12 bytes  offset 16
+	float  Radius;            //  4 bytes  offset 28
+	float  InnerRadius;       //  4 bytes  offset 32
+	float  FalloffExponent;   //  4 bytes  offset 36
+	uint   WindType;          //  4 bytes  offset 40
+	float  GustAmount;        //  4 bytes  offset 44
+	float  GustFrequency;     //  4 bytes  offset 48
+	float  NoiseStrength;     //  4 bytes  offset 52
+	float  NoiseFrequency;    //  4 bytes  offset 56
+	float  Padding;           //  4 bytes  offset 60
+};
+
+// Wind type constants
+#define WIND_TYPE_DIRECTIONAL 0
+#define WIND_TYPE_POINT       1
+#define WIND_TYPE_VORTEX      2
+#define WIND_TYPE_GUST        3
+
+// ============================================================================
+// Hash-based noise for turbulence
+// ============================================================================
+float HashValue(float3 p)
+{
+	p = frac(p * 0.3183099 + 0.1);
+	p *= 17.0;
+	return frac(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float Noise3D(float3 p)
+{
+	float3 i = floor(p);
+	float3 f = frac(p);
+	f = f * f * (3.0 - 2.0 * f); // smoothstep
+
+	return lerp(
+		lerp(lerp(HashValue(i + float3(0, 0, 0)), HashValue(i + float3(1, 0, 0)), f.x),
+		     lerp(HashValue(i + float3(0, 1, 0)), HashValue(i + float3(1, 1, 0)), f.x), f.y),
+		lerp(lerp(HashValue(i + float3(0, 0, 1)), HashValue(i + float3(1, 0, 1)), f.x),
+		     lerp(HashValue(i + float3(0, 1, 1)), HashValue(i + float3(1, 1, 1)), f.x), f.y),
+		f.z);
+}
+
+// ============================================================================
+// Curl noise for divergence-free turbulence
+// ============================================================================
+float3 CurlNoise(float3 p)
+{
+	const float e = 0.1;
+	float3 dx = float3(e, 0, 0);
+	float3 dy = float3(0, e, 0);
+	float3 dz = float3(0, 0, e);
+
+	float3 curl;
+	curl.x = Noise3D(p + dy) - Noise3D(p - dy) - Noise3D(p + dz) + Noise3D(p - dz);
+	curl.y = Noise3D(p + dz) - Noise3D(p - dz) - Noise3D(p + dx) + Noise3D(p - dx);
+	curl.z = Noise3D(p + dx) - Noise3D(p - dx) - Noise3D(p + dy) + Noise3D(p - dy);
+
+	return curl / (2.0 * e);
+}
+
+// ============================================================================
+// Per-source wind contribution functions
+// ============================================================================
+
+/** Directional (global) wind */
+float3 ComputeDirectionalWind(FGPUWindSource Source, float3 WorldPos, float Time)
+{
+	float3 Wind = Source.Direction * Source.Strength;
+
+	// Gust variation
+	float GustPhase = Time * Source.GustFrequency;
+	float Gust = sin(GustPhase + dot(WorldPos, Source.Direction) * 0.01) * 0.5 + 0.5;
+	Wind *= (1.0 + Gust * Source.GustAmount);
+
+	return Wind;
+}
+
+/** Point (radial) wind — pushes outward from source position */
+float3 ComputePointWind(FGPUWindSource Source, float3 WorldPos, float Time)
+{
+	float3 Delta = WorldPos - Source.Position;
+	float Distance = length(Delta);
+
+	if (Distance > Source.Radius || Distance < 0.001)
+		return float3(0, 0, 0);
+
+	float3 Dir = Delta / Distance;
+
+	// Compute distance-based falloff
+	float NormalizedDist = 0;
+	float RadiusRange = Source.Radius - Source.InnerRadius;
+	if (RadiusRange > 0)
+	{
+		NormalizedDist = saturate((Distance - Source.InnerRadius) / RadiusRange);
+	}
+	float Attenuation = pow(1.0 - NormalizedDist, Source.FalloffExponent);
+
+	// Gust variation
+	float GustPhase = Time * Source.GustFrequency;
+	float Gust = sin(GustPhase + Distance * 0.02) * 0.5 + 0.5;
+	float GustMul = 1.0 + Gust * Source.GustAmount;
+
+	return Dir * Source.Strength * Attenuation * GustMul;
+}
+
+/** Vortex (rotational) wind — swirls around vertical axis at source position */
+float3 ComputeVortexWind(FGPUWindSource Source, float3 WorldPos, float Time)
+{
+	float3 Delta = WorldPos - Source.Position;
+	float HorizDist = length(Delta.xz);
+
+	if (HorizDist > Source.Radius || HorizDist < 0.001)
+		return float3(0, 0, 0);
+
+	// Tangential direction (perpendicular to radius in XZ plane)
+	float3 Tangent = float3(-Delta.z, 0, Delta.x) / HorizDist;
+
+	// Outer falloff
+	float NormalizedDist = saturate(HorizDist / Source.Radius);
+	float OuterFade = 1.0 - NormalizedDist;
+
+	// Inner dead zone fade-in
+	float InnerFade = saturate(HorizDist / max(Source.InnerRadius, 1.0));
+
+	// Vertical falloff
+	float VertDist = abs(Delta.y);
+	float VertFade = saturate(1.0 - VertDist / (Source.Radius * 0.5));
+
+	return Tangent * Source.Strength * OuterFade * InnerFade * VertFade;
+}
