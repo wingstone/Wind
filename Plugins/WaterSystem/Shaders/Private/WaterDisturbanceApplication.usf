@@ -1,0 +1,56 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	WaterDisturbanceApplication.usf: Apply water disturbances (splashes)
+=============================================================================*/
+
+#include "/Engine/Private/Common.ush"
+
+#define THREAD_GROUP_SIZE 16
+
+int GridSize;
+float CellSize;
+float DisturbanceStrength;
+float DisturbanceRadius;
+float2 DisturbancePosition;
+
+RWStructuredBuffer<float> HeightField;
+
+int GridIndex(int2 Coord)
+{
+	Coord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
+	return Coord.y * GridSize + Coord.x;
+}
+
+float2 GridToWorld(int2 Coord)
+{
+	float2 Center = float2(GridSize / 2, GridSize / 2);
+	return (float2(Coord) - Center) * CellSize;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	int Index = GridIndex(Coord);
+	
+	// Get world position of this cell
+	float2 WorldPos = GridToWorld(Coord);
+	
+	// Distance from disturbance center
+	float Distance = length(WorldPos - DisturbancePosition);
+	
+	// Apply Gaussian falloff
+	if (Distance < DisturbanceRadius)
+	{
+		float Falloff = exp(-Distance * Distance / (DisturbanceRadius * DisturbanceRadius * 0.5));
+		float Delta = DisturbanceStrength * Falloff;
+		
+		// Add to height
+		HeightField[Index] += Delta;
+	}
+}

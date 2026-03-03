@@ -1,0 +1,161 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	ShallowWaterSolver.usf: 2D Shallow Water Equations Solver
+	
+	Solves the shallow water equations using finite difference method:
+	∂h/∂t + ∂(hu)/∂x + ∂(hv)/∂y = 0  (continuity)
+	∂u/∂t + u∂u/∂x + v∂u/∂y = -g∂h/∂x + ν∇²u - ku  (x-momentum)
+	∂v/∂t + u∂v/∂x + v∂v/∂y = -g∂h/∂y + ν∇²v - kv  (y-momentum)
+	
+	where:
+	h = water height
+	u, v = velocity components
+	g = gravity
+	ν = viscosity
+	k = damping/friction
+=============================================================================*/
+
+#include "/Engine/Private/Common.ush"
+
+#define THREAD_GROUP_SIZE 16
+
+// Simulation parameters
+int GridSize;
+float DeltaTime;
+float CellSize;
+float Gravity;
+float Viscosity;
+float Damping;
+
+// Input fields (current state)
+RWStructuredBuffer<float> HeightField;
+RWStructuredBuffer<float2> VelocityField;
+
+// Output fields (next state)
+RWStructuredBuffer<float> OutHeightField;
+RWStructuredBuffer<float2> OutVelocityField;
+
+// Convert 2D grid coordinates to 1D buffer index
+int GridIndex(int2 Coord)
+{
+	// Clamp to grid bounds
+	Coord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
+	return Coord.y * GridSize + Coord.x;
+}
+
+// Sample height field with boundary conditions
+float SampleHeight(int2 Coord)
+{
+	return HeightField[GridIndex(Coord)];
+}
+
+// Sample velocity field with boundary conditions
+float2 SampleVelocity(int2 Coord)
+{
+	return VelocityField[GridIndex(Coord)];
+}
+
+// Compute Laplacian (∇²) for diffusion term
+float ComputeLaplacian(int2 Coord, RWStructuredBuffer<float> Field)
+{
+	float Center = Field[GridIndex(Coord)];
+	float Left   = Field[GridIndex(Coord + int2(-1, 0))];
+	float Right  = Field[GridIndex(Coord + int2(1, 0))];
+	float Up     = Field[GridIndex(Coord + int2(0, 1))];
+	float Down   = Field[GridIndex(Coord + int2(0, -1))];
+	
+	return (Left + Right + Up + Down - 4.0 * Center) / (CellSize * CellSize);
+}
+
+float2 ComputeVelocityLaplacian(int2 Coord)
+{
+	float2 Center = SampleVelocity(Coord);
+	float2 Left   = SampleVelocity(Coord + int2(-1, 0));
+	float2 Right  = SampleVelocity(Coord + int2(1, 0));
+	float2 Up     = SampleVelocity(Coord + int2(0, 1));
+	float2 Down   = SampleVelocity(Coord + int2(0, -1));
+	
+	return (Left + Right + Up + Down - 4.0 * Center) / (CellSize * CellSize);
+}
+
+// Compute gradient of height field
+float2 ComputeHeightGradient(int2 Coord)
+{
+	float Right = SampleHeight(Coord + int2(1, 0));
+	float Left  = SampleHeight(Coord + int2(-1, 0));
+	float Up    = SampleHeight(Coord + int2(0, 1));
+	float Down  = SampleHeight(Coord + int2(0, -1));
+	
+	return float2(
+		(Right - Left) / (2.0 * CellSize),
+		(Up - Down) / (2.0 * CellSize)
+	);
+}
+
+// Compute divergence of velocity field (for continuity equation)
+float ComputeVelocityDivergence(int2 Coord)
+{
+	float2 Right = SampleVelocity(Coord + int2(1, 0));
+	float2 Left  = SampleVelocity(Coord + int2(-1, 0));
+	float2 Up    = SampleVelocity(Coord + int2(0, 1));
+	float2 Down  = SampleVelocity(Coord + int2(0, -1));
+	
+	float dUdx = (Right.x - Left.x) / (2.0 * CellSize);
+	float dVdy = (Up.y - Down.y) / (2.0 * CellSize);
+	
+	return dUdx + dVdy;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	// Boundary check
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	int Index = GridIndex(Coord);
+	
+	// Current state
+	float h = HeightField[Index];
+	float2 vel = VelocityField[Index];
+	
+	// Skip computation for cells with no water
+	if (abs(h) < 0.001 && length(vel) < 0.001)
+	{
+		OutHeightField[Index] = h;
+		OutVelocityField[Index] = vel;
+		return;
+	}
+	
+	// --- Continuity Equation: ∂h/∂t = -∇·(h*v) ---
+	float div = ComputeVelocityDivergence(Coord);
+	float dhdt = -h * div;
+	
+	// --- Momentum Equations ---
+	float2 heightGrad = ComputeHeightGradient(Coord);
+	float2 velLaplacian = ComputeVelocityLaplacian(Coord);
+	
+	// ∂u/∂t = -g∂h/∂x + ν∇²u - ku
+	float2 dvdt = -Gravity * heightGrad + Viscosity * velLaplacian - Damping * vel;
+	
+	// --- Time Integration (Forward Euler) ---
+	float newHeight = h + dhdt * DeltaTime;
+	float2 newVelocity = vel + dvdt * DeltaTime;
+	
+	// Boundary conditions: zero velocity at edges
+	if (Coord.x == 0 || Coord.x == GridSize - 1 || Coord.y == 0 || Coord.y == GridSize - 1)
+	{
+		newVelocity = float2(0, 0);
+	}
+	
+	// Stability: clamp extreme values
+	newHeight = clamp(newHeight, -1000.0, 1000.0);
+	newVelocity = clamp(newVelocity, -500.0, 500.0);
+	
+	// Write output
+	OutHeightField[Index] = newHeight;
+	OutVelocityField[Index] = newVelocity;
+}

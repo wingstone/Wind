@@ -1,0 +1,269 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	NavierStokesSolver2D.usf: 2D Incompressible Navier-Stokes Equations Solver
+	
+	Solves the incompressible Navier-Stokes equations in 2D:
+	∂u/∂t + (u·∇)u = -1/ρ ∇p + ν∇²u + f  (momentum equation)
+	∇·u = 0                                 (incompressibility constraint)
+	
+	Method: Projection Method (Chorin's method)
+	Step 1: Advection - transport velocity by flow
+	Step 2: Diffusion - apply viscosity
+	Step 3: Force Application - external forces
+	Step 4: Projection - enforce incompressibility via pressure solve
+	
+	where:
+	u = velocity field (u, v)
+	p = pressure
+	ρ = density
+	ν = kinematic viscosity
+	f = external forces
+=============================================================================*/
+
+#include "/Engine/Private/Common.ush"
+
+#define THREAD_GROUP_SIZE 16
+
+// Simulation parameters
+int GridSize;
+float DeltaTime;
+float CellSize;
+float Density;
+float Viscosity;
+float Damping;
+
+// Velocity field (double buffered)
+RWStructuredBuffer<float2> VelocityField;
+RWStructuredBuffer<float2> TempVelocityField;
+
+// Pressure field
+RWStructuredBuffer<float> PressureField;
+RWStructuredBuffer<float> DivergenceField;
+
+// Output
+RWStructuredBuffer<float2> OutVelocityField;
+
+// Convert 2D grid coordinates to 1D buffer index
+int GridIndex(int2 Coord)
+{
+	// Clamp to grid bounds
+	Coord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
+	return Coord.y * GridSize + Coord.x;
+}
+
+// Sample velocity with boundary conditions
+float2 SampleVelocity(int2 Coord)
+{
+	// Free-slip boundary conditions (zero normal velocity)
+	if (Coord.x < 0 || Coord.x >= GridSize || Coord.y < 0 || Coord.y >= GridSize)
+		return float2(0, 0);
+	
+	return VelocityField[GridIndex(Coord)];
+}
+
+// Bilinear interpolation for semi-Lagrangian advection
+float2 BilinearSample(float2 Position)
+{
+	// Position in grid coordinates
+	float2 GridPos = Position / CellSize + float2(GridSize / 2, GridSize / 2);
+	
+	int2 i = int2(floor(GridPos));
+	float2 f = frac(GridPos);
+	
+	// Bilinear weights
+	float2 v00 = SampleVelocity(i + int2(0, 0));
+	float2 v10 = SampleVelocity(i + int2(1, 0));
+	float2 v01 = SampleVelocity(i + int2(0, 1));
+	float2 v11 = SampleVelocity(i + int2(1, 1));
+	
+	return lerp(lerp(v00, v10, f.x), lerp(v01, v11, f.x), f.y);
+}
+
+// Compute divergence
+float ComputeDivergence(int2 Coord)
+{
+	float2 Right = SampleVelocity(Coord + int2(1, 0));
+	float2 Left  = SampleVelocity(Coord + int2(-1, 0));
+	float2 Up    = SampleVelocity(Coord + int2(0, 1));
+	float2 Down  = SampleVelocity(Coord + int2(0, -1));
+	
+	float dUdx = (Right.x - Left.x) / (2.0 * CellSize);
+	float dVdy = (Up.y - Down.y) / (2.0 * CellSize);
+	
+	return dUdx + dVdy;
+}
+
+// Compute Laplacian for diffusion
+float2 ComputeLaplacian(int2 Coord)
+{
+	float2 Center = SampleVelocity(Coord);
+	float2 Left   = SampleVelocity(Coord + int2(-1, 0));
+	float2 Right  = SampleVelocity(Coord + int2(1, 0));
+	float2 Up     = SampleVelocity(Coord + int2(0, 1));
+	float2 Down   = SampleVelocity(Coord + int2(0, -1));
+	
+	return (Left + Right + Up + Down - 4.0 * Center) / (CellSize * CellSize);
+}
+
+// Compute pressure gradient
+float2 ComputePressureGradient(int2 Coord)
+{
+	float Right = PressureField[GridIndex(Coord + int2(1, 0))];
+	float Left  = PressureField[GridIndex(Coord + int2(-1, 0))];
+	float Up    = PressureField[GridIndex(Coord + int2(0, 1))];
+	float Down  = PressureField[GridIndex(Coord + int2(0, -1))];
+	
+	return float2(
+		(Right - Left) / (2.0 * CellSize),
+		(Up - Down) / (2.0 * CellSize)
+	);
+}
+
+//=============================================================================
+// Step 1: Advection (Semi-Lagrangian)
+//=============================================================================
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void AdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	int Index = GridIndex(Coord);
+	
+	// Current velocity
+	float2 vel = VelocityField[Index];
+	
+	// World position of this cell
+	float2 WorldPos = (float2(Coord) - float2(GridSize / 2, GridSize / 2)) * CellSize;
+	
+	// Trace backwards in time
+	float2 BackPos = WorldPos - vel * DeltaTime;
+	
+	// Sample velocity at back-traced position
+	float2 newVel = BilinearSample(BackPos);
+	
+	// Apply damping
+	newVel *= (1.0 - Damping * DeltaTime);
+	
+	// Write to temp buffer
+	TempVelocityField[Index] = newVel;
+}
+
+//=============================================================================
+// Step 2: Diffusion (Implicit via Jacobi iteration)
+//=============================================================================
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	int Index = GridIndex(Coord);
+	
+	// Get velocity from temp buffer
+	float2 vel = TempVelocityField[Index];
+	
+	// Compute Laplacian
+	float2 laplacian = ComputeLaplacian(Coord);
+	
+	// Apply viscosity
+	vel += Viscosity * laplacian * DeltaTime;
+	
+	// Boundary conditions
+	if (Coord.x == 0 || Coord.x == GridSize - 1 || Coord.y == 0 || Coord.y == GridSize - 1)
+	{
+		vel = float2(0, 0);
+	}
+	
+	VelocityField[Index] = vel;
+}
+
+//=============================================================================
+// Step 3: Compute Divergence
+//=============================================================================
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void ComputeDivergenceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	int Index = GridIndex(Coord);
+	
+	// Compute divergence
+	float div = ComputeDivergence(Coord);
+	
+	DivergenceField[Index] = div;
+}
+
+//=============================================================================
+// Step 4: Pressure Solve (Jacobi iteration)
+//=============================================================================
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void PressureSolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	int Index = GridIndex(Coord);
+	
+	// Boundary: zero pressure
+	if (Coord.x == 0 || Coord.x == GridSize - 1 || Coord.y == 0 || Coord.y == GridSize - 1)
+	{
+		PressureField[Index] = 0.0;
+		return;
+	}
+	
+	// Jacobi iteration for Poisson equation: ∇²p = ρ/dt * ∇·u
+	float pLeft  = PressureField[GridIndex(Coord + int2(-1, 0))];
+	float pRight = PressureField[GridIndex(Coord + int2(1, 0))];
+	float pUp    = PressureField[GridIndex(Coord + int2(0, 1))];
+	float pDown  = PressureField[GridIndex(Coord + int2(0, -1))];
+	
+	float divergence = DivergenceField[Index];
+	
+	// Jacobi update
+	float newPressure = 0.25 * (pLeft + pRight + pUp + pDown - CellSize * CellSize * Density * divergence / DeltaTime);
+	
+	PressureField[Index] = newPressure;
+}
+
+//=============================================================================
+// Step 5: Projection (subtract pressure gradient)
+//=============================================================================
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void ProjectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	int Index = GridIndex(Coord);
+	
+	// Current velocity
+	float2 vel = VelocityField[Index];
+	
+	// Subtract pressure gradient
+	float2 pressureGrad = ComputePressureGradient(Coord);
+	vel -= DeltaTime / Density * pressureGrad;
+	
+	// Boundary conditions
+	if (Coord.x == 0 || Coord.x == GridSize - 1 || Coord.y == 0 || Coord.y == GridSize - 1)
+	{
+		vel = float2(0, 0);
+	}
+	
+	// Stability: clamp extreme values
+	vel = clamp(vel, -1000.0, 1000.0);
+	
+	OutVelocityField[Index] = vel;
+}
