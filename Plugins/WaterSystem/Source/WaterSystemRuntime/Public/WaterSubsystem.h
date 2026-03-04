@@ -7,7 +7,7 @@
 #include "WaterFluidTypes.h"
 #include "WaterSubsystem.generated.h"
 
-class FWaterFluidGPUData;
+class FWaterFieldSceneExtension;
 class UWaterInteractionComponent;
 
 /**
@@ -75,13 +75,10 @@ public:
 	/** Get all registered interaction components */
 	const TArray<UWaterInteractionComponent*>& GetInteractionComponents() const { return InteractionComponents; }
 
-	/** Get GPU data manager */
-	TSharedPtr<FWaterFluidGPUData> GetGPUData() const { return GPUData; }
+	/** Get scene extension (for rendering thread) */
+	FWaterFieldSceneExtension* GetSceneExtension() const;
 
 private:
-	/** GPU data manager for render thread communication */
-	TSharedPtr<FWaterFluidGPUData> GPUData;
-
 	/** All registered interaction components */
 	UPROPERTY()
 	TArray<TObjectPtr<UWaterInteractionComponent>> InteractionComponents;
@@ -92,8 +89,14 @@ private:
 	/** Cached velocity field (for CPU queries) */
 	TArray<FVector2D> CachedVelocityField;
 
-	/** Update GPU data and push to render thread */
-	void UpdateGPUData(float DeltaTime);
+	/** Update scene extension on render thread */
+	void UpdateSceneExtension(float DeltaTime);
+
+	/** Send disturbance to render thread */
+	void SendDisturbanceToRT(const FVector2D& Position, float Strength, float Radius, float Duration);
+
+	/** Send interaction to render thread */
+	void SendInteractionToRT(const FWaterInteractionData& Interaction);
 
 	/** Get the center position for the fluid field */
 	FVector2D GetFieldCenterPosition() const;

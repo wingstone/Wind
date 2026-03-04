@@ -1,20 +1,20 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "WaterSubsystem.h"
-#include "WaterFluidGPUData.h"
 #include "WaterInteractionComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "SceneInterface.h"
+#include "RendererInterface.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWaterSystem, Log, All);
+
+// Forward declare to avoid circular dependency
+class FWaterFieldSceneExtension;
 
 void UWaterSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-
-	// Create GPU data manager
-	GPUData = MakeShared<FWaterFluidGPUData>();
-	GPUData->SetConfig(FluidConfig);
 
 	// Initialize cached fields
 	InitializeCachedFields();
@@ -28,7 +28,6 @@ void UWaterSubsystem::Deinitialize()
 	InteractionComponents.Empty();
 	CachedHeightField.Empty();
 	CachedVelocityField.Empty();
-	GPUData.Reset();
 
 	Super::Deinitialize();
 }
@@ -37,11 +36,11 @@ void UWaterSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	if (!bEnableSimulation || !GPUData.IsValid())
+	if (!bEnableSimulation)
 		return;
 
-	// Update GPU data
-	UpdateGPUData(DeltaTime);
+	// Update scene extension on render thread
+	UpdateSceneExtension(DeltaTime);
 }
 
 TStatId UWaterSubsystem::GetStatId() const
@@ -58,7 +57,7 @@ FWaterSample UWaterSubsystem::SampleWaterAtLocation(FVector2D WorldPosition) con
 {
 	FWaterSample Sample;
 
-	if (!GPUData.IsValid())
+	if (!bEnableSimulation)
 		return Sample;
 
 	// Sample from cached CPU field (approximation)
@@ -99,20 +98,14 @@ float UWaterSubsystem::GetWaterHeight(FVector2D WorldPosition) const
 
 void UWaterSubsystem::CreateSplash(FVector2D Position, float Strength, float Radius, float Duration)
 {
-	if (GPUData.IsValid())
-	{
-		GPUData->AddDisturbance(Position, Strength, Radius, Duration);
-		UE_LOG(LogWaterSystem, Verbose, TEXT("Created splash at (%.1f, %.1f) - Strength: %.1f, Radius: %.1f"), 
-			Position.X, Position.Y, Strength, Radius);
-	}
+	SendDisturbanceToRT(Position, Strength, Radius, Duration);
+	UE_LOG(LogWaterSystem, Verbose, TEXT("Created splash at (%.1f, %.1f) - Strength: %.1f, Radius: %.1f"), 
+		Position.X, Position.Y, Strength, Radius);
 }
 
 void UWaterSubsystem::ApplyInteraction(const FWaterInteractionData& Interaction)
 {
-	if (GPUData.IsValid())
-	{
-		GPUData->AddInteraction(Interaction);
-	}
+	SendInteractionToRT(Interaction);
 }
 
 void UWaterSubsystem::RegisterInteractionComponent(UWaterInteractionComponent* Component)
@@ -133,20 +126,56 @@ void UWaterSubsystem::UnregisterInteractionComponent(UWaterInteractionComponent*
 	}
 }
 
-void UWaterSubsystem::UpdateGPUData(float DeltaTime)
+FWaterFieldSceneExtension* UWaterSubsystem::GetSceneExtension() const
 {
-	if (!GPUData.IsValid())
-		return;
+	if (UWorld* World = GetWorld())
+	{
+		if (FSceneInterface* Scene = World->Scene)
+		{
+			// Get the scene extension - this would be registered by the renderer module
+			// For now, return nullptr as placeholder
+			// TODO: Implement proper scene extension retrieval
+			return nullptr;
+		}
+	}
+	return nullptr;
+}
 
-	// Update GPU data
-	GPUData->SetConfig(FluidConfig);
-	GPUData->Update(DeltaTime);
+void UWaterSubsystem::UpdateSceneExtension(float DeltaTime)
+{
+	// Send configuration updates to render thread via ENQUEUE_RENDER_COMMAND
+	FWaterFluidConfig ConfigCopy = FluidConfig;
+	
+	ENQUEUE_RENDER_COMMAND(UpdateWaterConfig)(
+		[ConfigCopy](FRHICommandListImmediate& RHICmdList)
+		{
+			// TODO: Get scene extension from scene and update config
+			// SceneExtension->SetConfig(ConfigCopy);
+		});
+}
 
-	// TODO: Push to render thread via proxy
-	// ENQUEUE_RENDER_COMMAND(UpdateWaterField)([...]{ ... });
+void UWaterSubsystem::SendDisturbanceToRT(const FVector2D& Position, float Strength, float Radius, float Duration)
+{
+	// Enqueue command to render thread
+	ENQUEUE_RENDER_COMMAND(AddWaterDisturbance)(
+		[Position, Strength, Radius, Duration](FRHICommandListImmediate& RHICmdList)
+		{
+			// TODO: Get scene extension and add disturbance
+			// SceneExtension->AddDisturbance(Position, Strength, Radius, Duration);
+		});
+}
 
-	// For now, just clear processed interactions
-	GPUData->ClearInteractions();
+void UWaterSubsystem::SendInteractionToRT(const FWaterInteractionData& Interaction)
+{
+	// Copy interaction data
+	FWaterInteractionData InteractionCopy = Interaction;
+	
+	ENQUEUE_RENDER_COMMAND(AddWaterInteraction)(
+		[InteractionCopy](FRHICommandListImmediate& RHICmdList)
+		{
+			// TODO: Get scene extension and add interaction
+			// SceneExtension->AddInteraction(InteractionCopy);
+		});
 }
 
 FVector2D UWaterSubsystem::GetFieldCenterPosition() const
