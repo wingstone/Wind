@@ -90,18 +90,18 @@ void FWaterFieldSceneExtension::FRenderer::PreRender(FRDGBuilder& GraphBuilder)
 	if (!Extension.bHasValidData)
 	{
 		// Initialize resources on first render
-		InitializeResources(GraphBuilder);
+		InitializeResources_RenderThread(GraphBuilder);
 		Extension.bHasValidData = true;
 	}
 
 	if (Extension.bNeedsUpdate)
 	{
-		DispatchWaterFieldCompute(GraphBuilder);
+		DispatchWaterFieldCompute_RenderThread(GraphBuilder);
 		Extension.bNeedsUpdate = false;
 	}
 }
 
-void FWaterFieldSceneExtension::FRenderer::InitializeResources(FRDGBuilder& GraphBuilder)
+void FWaterFieldSceneExtension::FRenderer::InitializeResources_RenderThread(FRDGBuilder& GraphBuilder)
 {
 	const FWaterFluidConfig& Config = Extension.CurrentConfig;
 	FIntPoint GridExtent(Config.GridSize, Config.GridSize);
@@ -189,7 +189,7 @@ void FWaterFieldSceneExtension::FRenderer::InitializeResources(FRDGBuilder& Grap
 	UE_LOG(LogWaterFieldSceneExtension, Log, TEXT("Initialized WaterField resources: %dx%d"), Config.GridSize, Config.GridSize);
 }
 
-void FWaterFieldSceneExtension::FRenderer::DispatchWaterFieldCompute(FRDGBuilder& GraphBuilder)
+void FWaterFieldSceneExtension::FRenderer::DispatchWaterFieldCompute_RenderThread(FRDGBuilder& GraphBuilder)
 {
 	if (!Extension.HeightFieldRT.IsValid() || !Extension.VelocityFieldRT.IsValid())
 		return;
@@ -203,35 +203,35 @@ void FWaterFieldSceneExtension::FRenderer::DispatchWaterFieldCompute(FRDGBuilder
 	// Dispatch appropriate solver
 	if (Config.SolverType == EFluidSolverType::ShallowWater)
 	{
-		ExecuteShallowWaterSolver(GraphBuilder, Config.TimeStep);
+		ExecuteShallowWaterSolver_RenderThread(GraphBuilder, Config.TimeStep);
 	}
 	else
 	{
-		ExecuteNavierStokesSolver(GraphBuilder, Config.TimeStep);
+		ExecuteNavierStokesSolver_RenderThread(GraphBuilder, Config.TimeStep);
 	}
 
 	Extension.CurrentTime += Config.TimeStep;
 }
 
-void FWaterFieldSceneExtension::FRenderer::ExecuteShallowWaterSolver(FRDGBuilder& GraphBuilder, float DeltaTime)
+void FWaterFieldSceneExtension::FRenderer::ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime)
 {
 	// TODO: Implement shallow water solver dispatch
 	// Requires shader conversion to texture-based operations
 	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Shallow Water solver (stub), dt=%.4f"), DeltaTime);
 }
 
-void FWaterFieldSceneExtension::FRenderer::ExecuteNavierStokesSolver(FRDGBuilder& GraphBuilder, float DeltaTime)
+void FWaterFieldSceneExtension::FRenderer::ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime)
 {
 	// TODO: Implement Navier-Stokes solver dispatch
 	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Navier-Stokes solver (stub), dt=%.4f"), DeltaTime);
 }
 
-void FWaterFieldSceneExtension::FRenderer::ApplyDisturbances(FRDGBuilder& GraphBuilder)
+void FWaterFieldSceneExtension::FRenderer::ApplyDisturbances_RenderThread(FRDGBuilder& GraphBuilder)
 {
 	// TODO: Disturbance application
 }
 
-void FWaterFieldSceneExtension::FRenderer::ApplyInteractions(FRDGBuilder& GraphBuilder)
+void FWaterFieldSceneExtension::FRenderer::ApplyInteractions_RenderThread(FRDGBuilder& GraphBuilder)
 {
 	// TODO: Interaction application
 }

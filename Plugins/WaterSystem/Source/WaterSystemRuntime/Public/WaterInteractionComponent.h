@@ -47,33 +47,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction")
 	bool bGenerateContinuousWaves = true;
 
-	// --- Physics Response ---
-
-	/** Enable buoyancy force application */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Physics")
-	bool bApplyBuoyancy = true;
-
-	/** Buoyancy strength multiplier */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Physics")
-	float BuoyancyStrength = 1.5f;
-
-	/** Enable water drag/resistance */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Physics")
-	bool bApplyWaterDrag = true;
-
-	/** Water drag coefficient */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Physics")
-	float DragCoefficient = 0.5f;
-
 	// --- Manual Control ---
 
 	/** Manually create a splash at current location */
 	UFUNCTION(BlueprintCallable, Category = "Water Interaction")
 	void CreateSplash(float Strength, float Radius);
-
-	/** Query water properties at current location */
-	UFUNCTION(BlueprintCallable, Category = "Water Interaction")
-	FWaterSample GetWaterSample() const;
 
 	/** Check if currently submerged in water */
 	UFUNCTION(BlueprintPure, Category = "Water Interaction")
@@ -82,14 +60,6 @@ public:
 	/** Get submersion ratio (0 = not submerged, 1 = fully submerged) */
 	UFUNCTION(BlueprintPure, Category = "Water Interaction")
 	float GetSubmersionRatio() const;
-
-	/** Apply buoyancy force to a physics component */
-	UFUNCTION(BlueprintCallable, Category = "Water Interaction")
-	void ApplyBuoyancyForce(UPrimitiveComponent* Component);
-
-	/** Apply water drag to a physics component */
-	UFUNCTION(BlueprintCallable, Category = "Water Interaction")
-	void ApplyDragForce(UPrimitiveComponent* Component);
 
 protected:
 	virtual void BeginPlay() override;
@@ -105,6 +75,5 @@ private:
 	void RegisterWithSubsystem();
 	void UnregisterFromSubsystem();
 	void UpdateInteraction(float DeltaTime);
-	void ApplyPhysicsForces(float DeltaTime);
 	UWaterSubsystem* GetWaterSubsystem() const;
 };

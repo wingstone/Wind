@@ -85,11 +85,11 @@ public:
 	private:
 		FWaterFieldSceneExtension& Extension;
 
-		void InitializeResources(FRDGBuilder& GraphBuilder);
-		void DispatchWaterFieldCompute(FRDGBuilder& GraphBuilder);
-		void ExecuteShallowWaterSolver(FRDGBuilder& GraphBuilder, float DeltaTime);
-		void ExecuteNavierStokesSolver(FRDGBuilder& GraphBuilder, float DeltaTime);
-		void ApplyDisturbances(FRDGBuilder& GraphBuilder);
-		void ApplyInteractions(FRDGBuilder& GraphBuilder);
+		void InitializeResources_RenderThread(FRDGBuilder& GraphBuilder);
+		void DispatchWaterFieldCompute_RenderThread(FRDGBuilder& GraphBuilder);
+		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime);
+		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime);
+		void ApplyDisturbances_RenderThread(FRDGBuilder& GraphBuilder);
+		void ApplyInteractions_RenderThread(FRDGBuilder& GraphBuilder);
 	};
 };

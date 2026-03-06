@@ -43,20 +43,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Fluid", meta = (ClampMin = "1", ClampMax = "10"))
 	int32 SimulationSubsteps = 2;
 
-	// --- Water Sampling (CPU) ---
-
-	/** Sample water properties at a world position */
-	UFUNCTION(BlueprintCallable, Category = "Water System")
-	FWaterSample SampleWaterAtLocation(FVector2D WorldPosition) const;
-
-	/** Check if a position is underwater */
-	UFUNCTION(BlueprintPure, Category = "Water System")
-	bool IsUnderwater(FVector WorldPosition) const;
-
-	/** Get water surface height at position */
-	UFUNCTION(BlueprintPure, Category = "Water System")
-	float GetWaterHeight(FVector2D WorldPosition) const;
-
 	// --- Interaction Management ---
 
 	/** Create a water splash/disturbance */
@@ -83,34 +69,13 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UWaterInteractionComponent>> InteractionComponents;
 
-	/** Cached water height field (for CPU queries) */
-	TArray<float> CachedHeightField;
-
-	/** Cached velocity field (for CPU queries) */
-	TArray<FVector2D> CachedVelocityField;
-
 	/** Update scene extension on render thread */
 	void UpdateSceneExtension(float DeltaTime);
 
 	/** Send disturbance to render thread */
-	void SendDisturbanceToRT(const FVector2D& Position, float Strength, float Radius, float Duration);
+	void SendDisturbance(const FVector2D& Position, float Strength, float Radius, float Duration);
 
 	/** Send interaction to render thread */
-	void SendInteractionToRT(const FWaterInteractionData& Interaction);
+	void SendInteraction(const FWaterInteractionData& Interaction);
 
-	/** Get the center position for the fluid field */
-	FVector2D GetFieldCenterPosition() const;
-
-	/** Convert world position to grid coordinates */
-	FIntPoint WorldToGrid(FVector2D WorldPosition) const;
-
-	/** Convert grid coordinates to world position */
-	FVector2D GridToWorld(FIntPoint GridPosition) const;
-
-	/** Initialize cached fields */
-	void InitializeCachedFields();
-
-	/** Sample from cached field */
-	float SampleCachedHeight(FVector2D WorldPosition) const;
-	FVector2D SampleCachedVelocity(FVector2D WorldPosition) const;
 };

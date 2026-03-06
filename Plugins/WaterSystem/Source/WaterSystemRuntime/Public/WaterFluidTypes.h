@@ -61,29 +61,6 @@ struct FWaterFluidConfig
 	float TimeStep = 0.016f;
 };
 
-/** Water sample data for CPU queries */
-USTRUCT(BlueprintType)
-struct FWaterSample
-{
-	GENERATED_BODY()
-
-	/** Water height at sample position (cm) */
-	UPROPERTY(BlueprintReadOnly, Category = "Water")
-	float Height = 0.0f;
-
-	/** Velocity field (cm/s) */
-	UPROPERTY(BlueprintReadOnly, Category = "Water")
-	FVector2D Velocity = FVector2D::ZeroVector;
-
-	/** Pressure at sample position */
-	UPROPERTY(BlueprintReadOnly, Category = "Water")
-	float Pressure = 0.0f;
-
-	/** Normal vector for rendering */
-	UPROPERTY(BlueprintReadOnly, Category = "Water")
-	FVector Normal = FVector::UpVector;
-};
-
 /** GPU-uploadable water disturbance data */
 struct FGPUWaterDisturbance
 {

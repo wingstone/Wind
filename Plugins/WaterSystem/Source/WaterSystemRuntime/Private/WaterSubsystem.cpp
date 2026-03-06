@@ -3,7 +3,6 @@
 #include "WaterSubsystem.h"
 #include "WaterInteractionComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/PlayerController.h"
 #include "SceneInterface.h"
 #include "RendererInterface.h"
 
@@ -16,9 +15,6 @@ void UWaterSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-	// Initialize cached fields
-	InitializeCachedFields();
-
 	UE_LOG(LogWaterSystem, Log, TEXT("WaterSubsystem initialized - GridSize: %d, WorldSize: %.1f"), 
 		FluidConfig.GridSize, FluidConfig.WorldSize);
 }
@@ -26,8 +22,6 @@ void UWaterSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UWaterSubsystem::Deinitialize()
 {
 	InteractionComponents.Empty();
-	CachedHeightField.Empty();
-	CachedVelocityField.Empty();
 
 	Super::Deinitialize();
 }
@@ -50,62 +44,18 @@ TStatId UWaterSubsystem::GetStatId() const
 
 bool UWaterSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
 {
-	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE || WorldType == EWorldType::Editor;
-}
-
-FWaterSample UWaterSubsystem::SampleWaterAtLocation(FVector2D WorldPosition) const
-{
-	FWaterSample Sample;
-
-	if (!bEnableSimulation)
-		return Sample;
-
-	// Sample from cached CPU field (approximation)
-	Sample.Height = SampleCachedHeight(WorldPosition);
-	Sample.Velocity = SampleCachedVelocity(WorldPosition);
-
-	// Calculate pressure (hydrostatic approximation)
-	Sample.Pressure = Sample.Height * FluidConfig.Density * FluidConfig.Gravity;
-
-	// Calculate normal from height gradient (for rendering)
-	const float Delta = FluidConfig.WorldSize / FluidConfig.GridSize;
-	float HeightXP = SampleCachedHeight(WorldPosition + FVector2D(Delta, 0));
-	float HeightXM = SampleCachedHeight(WorldPosition - FVector2D(Delta, 0));
-	float HeightYP = SampleCachedHeight(WorldPosition + FVector2D(0, Delta));
-	float HeightYM = SampleCachedHeight(WorldPosition - FVector2D(0, Delta));
-
-	FVector Gradient;
-	Gradient.X = (HeightXP - HeightXM) / (2.0f * Delta);
-	Gradient.Y = (HeightYP - HeightYM) / (2.0f * Delta);
-	Gradient.Z = 1.0f;
-
-	Sample.Normal = Gradient.GetSafeNormal();
-
-	return Sample;
-}
-
-bool UWaterSubsystem::IsUnderwater(FVector WorldPosition) const
-{
-	FVector2D Position2D(WorldPosition.X, WorldPosition.Y);
-	float WaterHeight = GetWaterHeight(Position2D);
-	return WorldPosition.Z < WaterHeight;
-}
-
-float UWaterSubsystem::GetWaterHeight(FVector2D WorldPosition) const
-{
-	return SampleCachedHeight(WorldPosition);
+	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE || WorldType == EWorldType::Editor || WorldType == EWorldType::GamePreview;
 }
 
 void UWaterSubsystem::CreateSplash(FVector2D Position, float Strength, float Radius, float Duration)
 {
-	SendDisturbanceToRT(Position, Strength, Radius, Duration);
-	UE_LOG(LogWaterSystem, Verbose, TEXT("Created splash at (%.1f, %.1f) - Strength: %.1f, Radius: %.1f"), 
-		Position.X, Position.Y, Strength, Radius);
+	SendDisturbance(Position, Strength, Radius, Duration);
+	UE_LOG(LogWaterSystem, Verbose, TEXT("Created splash at (%.1f, %.1f) - Strength: %.1f, Radius: %.1f"), Position.X, Position.Y, Strength, Radius);
 }
 
 void UWaterSubsystem::ApplyInteraction(const FWaterInteractionData& Interaction)
 {
-	SendInteractionToRT(Interaction);
+	SendInteraction(Interaction);
 }
 
 void UWaterSubsystem::RegisterInteractionComponent(UWaterInteractionComponent* Component)
@@ -154,7 +104,7 @@ void UWaterSubsystem::UpdateSceneExtension(float DeltaTime)
 		});
 }
 
-void UWaterSubsystem::SendDisturbanceToRT(const FVector2D& Position, float Strength, float Radius, float Duration)
+void UWaterSubsystem::SendDisturbance(const FVector2D& Position, float Strength, float Radius, float Duration)
 {
 	// Enqueue command to render thread
 	ENQUEUE_RENDER_COMMAND(AddWaterDisturbance)(
@@ -165,7 +115,7 @@ void UWaterSubsystem::SendDisturbanceToRT(const FVector2D& Position, float Stren
 		});
 }
 
-void UWaterSubsystem::SendInteractionToRT(const FWaterInteractionData& Interaction)
+void UWaterSubsystem::SendInteraction(const FWaterInteractionData& Interaction)
 {
 	// Copy interaction data
 	FWaterInteractionData InteractionCopy = Interaction;
@@ -176,88 +126,4 @@ void UWaterSubsystem::SendInteractionToRT(const FWaterInteractionData& Interacti
 			// TODO: Get scene extension and add interaction
 			// SceneExtension->AddInteraction(InteractionCopy);
 		});
-}
-
-FVector2D UWaterSubsystem::GetFieldCenterPosition() const
-{
-	if (UWorld* World = GetWorld())
-	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
-		{
-			FVector CamLoc;
-			FRotator CamRot;
-			PC->GetPlayerViewPoint(CamLoc, CamRot);
-			return FVector2D(CamLoc.X, CamLoc.Y);
-		}
-	}
-	return FVector2D::ZeroVector;
-}
-
-FIntPoint UWaterSubsystem::WorldToGrid(FVector2D WorldPosition) const
-{
-	FVector2D Center = GetFieldCenterPosition();
-	FVector2D LocalPos = WorldPosition - Center;
-
-	float CellSize = FluidConfig.WorldSize / FluidConfig.GridSize;
-	int32 X = FMath::FloorToInt(LocalPos.X / CellSize) + FluidConfig.GridSize / 2;
-	int32 Y = FMath::FloorToInt(LocalPos.Y / CellSize) + FluidConfig.GridSize / 2;
-
-	return FIntPoint(X, Y);
-}
-
-FVector2D UWaterSubsystem::GridToWorld(FIntPoint GridPosition) const
-{
-	FVector2D Center = GetFieldCenterPosition();
-	float CellSize = FluidConfig.WorldSize / FluidConfig.GridSize;
-
-	FVector2D LocalPos;
-	LocalPos.X = (GridPosition.X - FluidConfig.GridSize / 2) * CellSize;
-	LocalPos.Y = (GridPosition.Y - FluidConfig.GridSize / 2) * CellSize;
-
-	return Center + LocalPos;
-}
-
-void UWaterSubsystem::InitializeCachedFields()
-{
-	int32 TotalCells = FluidConfig.GridSize * FluidConfig.GridSize;
-	CachedHeightField.SetNumZeroed(TotalCells);
-	CachedVelocityField.SetNumZeroed(TotalCells);
-}
-
-float UWaterSubsystem::SampleCachedHeight(FVector2D WorldPosition) const
-{
-	FIntPoint GridPos = WorldToGrid(WorldPosition);
-
-	if (GridPos.X < 0 || GridPos.X >= FluidConfig.GridSize ||
-		GridPos.Y < 0 || GridPos.Y >= FluidConfig.GridSize)
-	{
-		return 0.0f;
-	}
-
-	int32 Index = GridPos.Y * FluidConfig.GridSize + GridPos.X;
-	if (Index >= 0 && Index < CachedHeightField.Num())
-	{
-		return CachedHeightField[Index];
-	}
-
-	return 0.0f;
-}
-
-FVector2D UWaterSubsystem::SampleCachedVelocity(FVector2D WorldPosition) const
-{
-	FIntPoint GridPos = WorldToGrid(WorldPosition);
-
-	if (GridPos.X < 0 || GridPos.X >= FluidConfig.GridSize ||
-		GridPos.Y < 0 || GridPos.Y >= FluidConfig.GridSize)
-	{
-		return FVector2D::ZeroVector;
-	}
-
-	int32 Index = GridPos.Y * FluidConfig.GridSize + GridPos.X;
-	if (Index >= 0 && Index < CachedVelocityField.Num())
-	{
-		return CachedVelocityField[Index];
-	}
-
-	return FVector2D::ZeroVector;
 }

@@ -3,8 +3,6 @@
 #include "WaterInteractionComponent.h"
 #include "WaterSubsystem.h"
 #include "Engine/World.h"
-#include "GameFramework/Actor.h"
-#include "Components/PrimitiveComponent.h"
 
 UWaterInteractionComponent::UWaterInteractionComponent()
 {
@@ -35,7 +33,6 @@ void UWaterInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickT
 		return;
 
 	UpdateInteraction(DeltaTime);
-	ApplyPhysicsForces(DeltaTime);
 
 	LastPosition = GetComponentLocation();
 	TimeSinceLastSplash += DeltaTime;
@@ -99,31 +96,6 @@ void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 	LastVelocity = CurrentVelocity;
 }
 
-void UWaterInteractionComponent::ApplyPhysicsForces(float DeltaTime)
-{
-	if (!bApplyBuoyancy && !bApplyWaterDrag)
-		return;
-
-	AActor* Owner = GetOwner();
-	if (!Owner)
-		return;
-
-	// Find physics component
-	UPrimitiveComponent* PhysicsComp = Cast<UPrimitiveComponent>(Owner->GetRootComponent());
-	if (!PhysicsComp || !PhysicsComp->IsSimulatingPhysics())
-		return;
-
-	if (bApplyBuoyancy)
-	{
-		ApplyBuoyancyForce(PhysicsComp);
-	}
-
-	if (bApplyWaterDrag)
-	{
-		ApplyDragForce(PhysicsComp);
-	}
-}
-
 void UWaterInteractionComponent::CreateSplash(float Strength, float Radius)
 {
 	UWaterSubsystem* WaterSys = GetWaterSubsystem();
@@ -137,100 +109,14 @@ void UWaterInteractionComponent::CreateSplash(float Strength, float Radius)
 	TimeSinceLastSplash = 0.0f;
 }
 
-FWaterSample UWaterInteractionComponent::GetWaterSample() const
-{
-	UWaterSubsystem* WaterSys = GetWaterSubsystem();
-	if (WaterSys)
-	{
-		FVector Position = GetComponentLocation();
-		return WaterSys->SampleWaterAtLocation(FVector2D(Position.X, Position.Y));
-	}
-	return FWaterSample();
-}
-
 bool UWaterInteractionComponent::IsSubmerged() const
 {
-	UWaterSubsystem* WaterSys = GetWaterSubsystem();
-	if (WaterSys)
-	{
-		return WaterSys->IsUnderwater(GetComponentLocation());
-	}
 	return false;
 }
 
 float UWaterInteractionComponent::GetSubmersionRatio() const
 {
-	UWaterSubsystem* WaterSys = GetWaterSubsystem();
-	if (!WaterSys)
-		return 0.0f;
-
-	FVector Position = GetComponentLocation();
-	FVector2D Position2D(Position.X, Position.Y);
-	float WaterHeight = WaterSys->GetWaterHeight(Position2D);
-
-	// Simple ratio based on position relative to water surface
-	AActor* Owner = GetOwner();
-	if (!Owner)
-		return 0.0f;
-
-	FVector Origin, Extent;
-	Owner->GetActorBounds(false, Origin, Extent);
-
-	float ObjectBottom = Origin.Z - Extent.Z;
-	float ObjectTop = Origin.Z + Extent.Z;
-
-	if (WaterHeight < ObjectBottom)
-		return 0.0f; // Above water
-
-	if (WaterHeight > ObjectTop)
-		return 1.0f; // Fully submerged
-
-	return (WaterHeight - ObjectBottom) / (2.0f * Extent.Z);
-}
-
-void UWaterInteractionComponent::ApplyBuoyancyForce(UPrimitiveComponent* Component)
-{
-	if (!Component || !Component->IsSimulatingPhysics())
-		return;
-
-	float SubmersionRatio = GetSubmersionRatio();
-	if (SubmersionRatio <= 0.0f)
-		return;
-
-	UWaterSubsystem* WaterSys = GetWaterSubsystem();
-	if (!WaterSys)
-		return;
-
-	// Archimedes' principle: F = ρ * V * g
-	float WaterDensity = WaterSys->FluidConfig.Density;
-	float Gravity = WaterSys->FluidConfig.Gravity;
-	float Volume = Component->GetMass(); // Approximate volume from mass
-
-	float BuoyancyForce = WaterDensity * Volume * Gravity * SubmersionRatio * BuoyancyStrength;
-	FVector UpwardForce = FVector(0, 0, BuoyancyForce);
-
-	Component->AddForce(UpwardForce);
-}
-
-void UWaterInteractionComponent::ApplyDragForce(UPrimitiveComponent* Component)
-{
-	if (!Component || !Component->IsSimulatingPhysics())
-		return;
-
-	float SubmersionRatio = GetSubmersionRatio();
-	if (SubmersionRatio <= 0.0f)
-		return;
-
-	FVector Velocity = Component->GetPhysicsLinearVelocity();
-	if (Velocity.SizeSquared() < 1.0f)
-		return;
-
-	// Drag force: F = -0.5 * ρ * Cd * A * v² * v_normalized
-	float WaterDensity = 1.0f; // Normalize
-	float Speed = Velocity.Size();
-	FVector DragForce = -0.5f * WaterDensity * DragCoefficient * Speed * Speed * Velocity.GetSafeNormal() * SubmersionRatio;
-
-	Component->AddForce(DragForce);
+	return 0.0f;
 }
 
 UWaterSubsystem* UWaterInteractionComponent::GetWaterSubsystem() const
