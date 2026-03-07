@@ -43,35 +43,6 @@ class FShallowWaterSolverCS : public FGlobalShader
 };
 
 /**
- * Apply water disturbances (splashes) compute shader
- */
-class FWaterDisturbanceApplicationCS : public FGlobalShader
-{
-	DECLARE_GLOBAL_SHADER(FWaterDisturbanceApplicationCS);
-	SHADER_USE_PARAMETER_STRUCT(FWaterDisturbanceApplicationCS, FGlobalShader);
-
-	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER(int32, GridSize)
-		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(float, DisturbanceStrength)
-		SHADER_PARAMETER(float, DisturbanceRadius)
-		SHADER_PARAMETER(FVector2f, DisturbancePosition)
-		SHADER_PARAMETER_UAV(RWStructuredBuffer<float>, HeightField)
-	END_SHADER_PARAMETER_STRUCT()
-
-	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-	{
-		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-	}
-
-	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
-	{
-		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
-		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
-	}
-};
-
-/**
  * Apply player/object interaction forces compute shader
  */
 class FWaterInteractionApplicationCS : public FGlobalShader

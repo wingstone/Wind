@@ -47,12 +47,6 @@ bool UWaterSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) con
 	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE || WorldType == EWorldType::Editor || WorldType == EWorldType::GamePreview;
 }
 
-void UWaterSubsystem::CreateSplash(FVector2D Position, float Strength, float Radius, float Duration)
-{
-	SendDisturbance(Position, Strength, Radius, Duration);
-	UE_LOG(LogWaterSystem, Verbose, TEXT("Created splash at (%.1f, %.1f) - Strength: %.1f, Radius: %.1f"), Position.X, Position.Y, Strength, Radius);
-}
-
 void UWaterSubsystem::ApplyInteraction(const FWaterInteractionData& Interaction)
 {
 	SendInteraction(Interaction);
@@ -101,17 +95,6 @@ void UWaterSubsystem::UpdateSceneExtension(float DeltaTime)
 		{
 			// TODO: Get scene extension from scene and update config
 			// SceneExtension->SetConfig(ConfigCopy);
-		});
-}
-
-void UWaterSubsystem::SendDisturbance(const FVector2D& Position, float Strength, float Radius, float Duration)
-{
-	// Enqueue command to render thread
-	ENQUEUE_RENDER_COMMAND(AddWaterDisturbance)(
-		[Position, Strength, Radius, Duration](FRHICommandListImmediate& RHICmdList)
-		{
-			// TODO: Get scene extension and add disturbance
-			// SceneExtension->AddDisturbance(Position, Strength, Radius, Duration);
 		});
 }
 

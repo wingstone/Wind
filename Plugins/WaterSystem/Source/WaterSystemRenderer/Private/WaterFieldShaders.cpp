@@ -5,7 +5,6 @@
 
 // Shallow Water Equations Solver
 IMPLEMENT_GLOBAL_SHADER(FShallowWaterSolverCS, "/Plugin/WaterSystem/Private/ShallowWaterSolver.usf", "MainCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FWaterDisturbanceApplicationCS, "/Plugin/WaterSystem/Private/WaterDisturbanceApplication.usf", "MainCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FWaterInteractionApplicationCS, "/Plugin/WaterSystem/Private/WaterInteractionApplication.usf", "MainCS", SF_Compute);
 
 // Navier-Stokes Solver (5 steps)

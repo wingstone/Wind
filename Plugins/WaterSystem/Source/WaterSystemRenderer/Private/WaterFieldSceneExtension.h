@@ -44,7 +44,6 @@ public:
 	TRefCountPtr<IPooledRenderTarget> DivergenceFieldRT;
 
 	// --- Current frame data (render thread) ---
-	TArray<FGPUWaterDisturbance> CurrentDisturbances;
 	TArray<FWaterInteractionData> CurrentInteractions;
 	FWaterFluidConfig CurrentConfig;
 	float CurrentTime = 0.0f;
@@ -89,7 +88,6 @@ public:
 		void DispatchWaterFieldCompute_RenderThread(FRDGBuilder& GraphBuilder);
 		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime);
 		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime);
-		void ApplyDisturbances_RenderThread(FRDGBuilder& GraphBuilder);
 		void ApplyInteractions_RenderThread(FRDGBuilder& GraphBuilder);
 	};
 };

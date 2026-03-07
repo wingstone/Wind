@@ -18,6 +18,24 @@ enum class EFluidSolverType : uint8
 	NavierStokes UMETA(DisplayName = "2D Navier-Stokes")
 };
 
+UENUM(BlueprintType)
+enum class ESourceShapeType : uint8
+{
+	Disk UMETA(DisplayName = "Disk Shape"),
+	
+	Ring UMETA(DisplayName = "Ring Shape")
+};
+
+UENUM(BlueprintType)
+enum class ESourceEmissionType : uint8
+{
+	Directional UMETA(DisplayName = "Directional Emission"),
+	
+	Omni UMETA(DisplayName = "Omni Emission"),
+
+	Vortex UMETA(DisplayName = "Vortex Emission")
+};
+
 /** 2D fluid simulation grid configuration */
 USTRUCT(BlueprintType)
 struct FWaterFluidConfig
@@ -61,28 +79,6 @@ struct FWaterFluidConfig
 	float TimeStep = 0.016f;
 };
 
-/** GPU-uploadable water disturbance data */
-struct FGPUWaterDisturbance
-{
-	FVector2D Position;      // XY position in 2D field
-	float Strength;          // Disturbance strength
-	float Radius;            // Effect radius
-	float Falloff;           // Falloff exponent
-	float Duration;          // Duration of disturbance
-	float ElapsedTime;       // Time since start
-	float Padding;           // Align to 16 bytes
-
-	FGPUWaterDisturbance()
-		: Position(ForceInitToZero)
-		, Strength(0.0f)
-		, Radius(0.0f)
-		, Falloff(2.0f)
-		, Duration(1.0f)
-		, ElapsedTime(0.0f)
-		, Padding(0.0f)
-	{}
-};
-
 /** Player/object interaction data */
 USTRUCT(BlueprintType)
 struct FWaterInteractionData
@@ -95,13 +91,25 @@ struct FWaterInteractionData
 
 	/** Interaction force/velocity */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
-	FVector2D Force = FVector2D::ZeroVector;
+	FVector2D ForceDirection = FVector2D::ZeroVector;
 
-	/** Interaction radius */
+	/** Interaction radius or ring radius and width */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
-	float Radius = 100.0f;
+	FVector2D RadiusParameter = FVector2D(100.0f, 0.0f);
 
-	/** Interaction strength multiplier */
+	/** Interaction strength  paramter: direction, omni, vortex */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
-	float Strength = 1.0f;
+	FVector3D StrengthParameter = FVector3D(1.0f, 0.0f, 0.0f);
+
+	/** Interaction Gaussian falloff */
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	float GaussianFalloff = 0.0f;
+
+	/** Interaction shape type */
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	ESourceShapeType ShapeType = ESourceShapeType::Disk;
+
+	/** Interaction emission type */
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	ESourceEmissionType EmissionType = ESourceEmissionType::Directional;
 };

@@ -27,39 +27,42 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction")
 	bool bEnableInteraction = true;
 
-	/** Interaction radius (cm) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction")
-	float InteractionRadius = 100.0f;
+	/** Interaction shape type */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	ESourceShapeType ShapeType = ESourceShapeType::Disk;
 
-	/** Interaction strength multiplier */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction")
-	float InteractionStrength = 1.0f;
+	/** Interaction emission type */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	ESourceEmissionType EmissionType = ESourceEmissionType::Directional;
 
-	/** Minimum velocity to trigger splash (cm/s) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction")
-	float SplashVelocityThreshold = 100.0f;
+	/** Interaction force/velocity */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	FVector2D ForceDirection = FVector2D::ZeroVector;
 
-	/** Splash strength multiplier */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction")
-	float SplashStrength = 50.0f;
+	/** Interaction radius */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	float Radius = 100.0f;
 
-	/** Enable continuous wave generation when moving */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction")
-	bool bGenerateContinuousWaves = true;
+	/** Interaction width (only used for ring shape) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	float Width = 0.0f; // Only used for ring shape
 
-	// --- Manual Control ---
+	/** Interaction direction strength paramter */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	float DisectionalStrength = 1.0f; // Only used for directional emission
 
-	/** Manually create a splash at current location */
-	UFUNCTION(BlueprintCallable, Category = "Water Interaction")
-	void CreateSplash(float Strength, float Radius);
+	/** Interaction omni strength paramter */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	float OmniStrength = 0.0f;	// Only used for omni emission
 
-	/** Check if currently submerged in water */
-	UFUNCTION(BlueprintPure, Category = "Water Interaction")
-	bool IsSubmerged() const;
+	/** Interaction vortex strength paramter */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	float VortexStrength = 0.0f;	// Only used for vortex emission
+	
+	/** Interaction Gaussian falloff */
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	float GaussianFalloff = 0.0f;
 
-	/** Get submersion ratio (0 = not submerged, 1 = fully submerged) */
-	UFUNCTION(BlueprintPure, Category = "Water Interaction")
-	float GetSubmersionRatio() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -67,11 +70,6 @@ protected:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
-	FVector LastPosition;
-	FVector LastVelocity;
-	float TimeSinceLastSplash;
-	bool bWasSubmerged;
-
 	void RegisterWithSubsystem();
 	void UnregisterFromSubsystem();
 	void UpdateInteraction(float DeltaTime);

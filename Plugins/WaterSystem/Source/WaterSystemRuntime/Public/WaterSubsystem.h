@@ -45,10 +45,6 @@ public:
 
 	// --- Interaction Management ---
 
-	/** Create a water splash/disturbance */
-	UFUNCTION(BlueprintCallable, Category = "Water System")
-	void CreateSplash(FVector2D Position, float Strength, float Radius, float Duration = 1.0f);
-
 	/** Apply continuous interaction (called by WaterInteractionComponent) */
 	void ApplyInteraction(const FWaterInteractionData& Interaction);
 
@@ -71,9 +67,6 @@ private:
 
 	/** Update scene extension on render thread */
 	void UpdateSceneExtension(float DeltaTime);
-
-	/** Send disturbance to render thread */
-	void SendDisturbance(const FVector2D& Position, float Strength, float Radius, float Duration);
 
 	/** Send interaction to render thread */
 	void SendInteraction(const FWaterInteractionData& Interaction);

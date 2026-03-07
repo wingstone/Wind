@@ -226,11 +226,6 @@ void FWaterFieldSceneExtension::FRenderer::ExecuteNavierStokesSolver_RenderThrea
 	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Navier-Stokes solver (stub), dt=%.4f"), DeltaTime);
 }
 
-void FWaterFieldSceneExtension::FRenderer::ApplyDisturbances_RenderThread(FRDGBuilder& GraphBuilder)
-{
-	// TODO: Disturbance application
-}
-
 void FWaterFieldSceneExtension::FRenderer::ApplyInteractions_RenderThread(FRDGBuilder& GraphBuilder)
 {
 	// TODO: Interaction application
