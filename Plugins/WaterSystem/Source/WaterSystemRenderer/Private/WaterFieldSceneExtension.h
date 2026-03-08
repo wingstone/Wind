@@ -25,34 +25,6 @@ class FWaterFieldSceneExtension : public ISceneExtension
 	DECLARE_SCENE_EXTENSION(WATERSYSTEMRENDERER_API, FWaterFieldSceneExtension);
 
 public:
-	static bool ShouldCreateExtension(FScene& Scene);
-
-	explicit FWaterFieldSceneExtension(FScene& InScene);
-	virtual ~FWaterFieldSceneExtension();
-
-	// ISceneExtension interface
-	virtual void InitExtension(FScene& InScene) override;
-	virtual ISceneExtensionUpdater* CreateUpdater() override;
-	virtual ISceneExtensionRenderer* CreateRenderer(FSceneRendererBase& InSceneRenderer, const FEngineShowFlags& EngineShowFlags) override;
-
-	// --- GPU Resources (render thread owned) ---
-	TRefCountPtr<IPooledRenderTarget> HeightFieldRT;
-	TRefCountPtr<IPooledRenderTarget> VelocityFieldRT;
-	TRefCountPtr<IPooledRenderTarget> TempHeightFieldRT;
-	TRefCountPtr<IPooledRenderTarget> TempVelocityFieldRT;
-	TRefCountPtr<IPooledRenderTarget> PressureFieldRT;
-	TRefCountPtr<IPooledRenderTarget> DivergenceFieldRT;
-
-	// --- Current frame data (render thread) ---
-	TArray<FWaterInteractionData> CurrentInteractions;
-	FWaterFluidConfig CurrentConfig;
-	float CurrentTime = 0.0f;
-	bool bNeedsUpdate = false;
-	bool bHasValidData = false;
-
-	// --- Bridge to game thread ---
-	TSharedPtr<FWaterFieldProxy> FieldProxy;
-	UWorld* CachedWorld = nullptr;
 
 	// ------------------------------------------------------------------
 	// Updater: runs during scene update phase (render thread)
@@ -63,7 +35,13 @@ public:
 	public:
 		FUpdater(FWaterFieldSceneExtension& InExtension) : Extension(InExtension) {}
 
-		virtual void PostGPUSceneUpdate(FRDGBuilder& GraphBuilder, FSceneUniformBuffer& SceneUniforms) override;
+		//~ Begin ISceneExtensionUpdater Interface.
+		virtual void PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms) override;
+		virtual void PostSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePostUpdateChangeSet& ChangeSet) override;
+		//~ End ISceneExtensionUpdater Interface.
+
+		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder);
+		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder);
 
 	private:
 		FWaterFieldSceneExtension& Extension;
@@ -90,4 +68,32 @@ public:
 		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime);
 		void ApplyInteractions_RenderThread(FRDGBuilder& GraphBuilder);
 	};
+	
+	static bool ShouldCreateExtension(FScene& Scene);
+
+	explicit FWaterFieldSceneExtension(FScene& InScene);
+	virtual ~FWaterFieldSceneExtension();
+
+	// ISceneExtension interface
+	virtual void InitExtension(FScene& InScene) override;
+	virtual ISceneExtensionUpdater* CreateUpdater() override;
+	virtual ISceneExtensionRenderer* CreateRenderer(FSceneRendererBase& InSceneRenderer, const FEngineShowFlags& EngineShowFlags) override;
+
+	void SetConfig_RenderThread(const FWaterFluidConfig& NewConfig);
+	void AddInteraction_RenderThread(const FWaterInteractionData& Interaction);
+
+private:
+
+	// --- GPU Resources (render thread owned) ---
+	TRefCountPtr<IPooledRenderTarget> HeightFieldRT;
+	TRefCountPtr<IPooledRenderTarget> VelocityFieldRT;
+
+	TRefCountPtr<IPooledRenderTarget> TempHeightFieldRT;
+	TRefCountPtr<IPooledRenderTarget> TempVelocityFieldRT;
+	TRefCountPtr<IPooledRenderTarget> PressureFieldRT;
+	TRefCountPtr<IPooledRenderTarget> DivergenceFieldRT;
+
+	// --- Current frame data (render thread) ---
+	TArray<FWaterInteractionData> CurrentInteractions;
+	FWaterFluidConfig CurrentConfig;
 };

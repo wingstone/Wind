@@ -9,25 +9,50 @@
 #include "RenderGraphResources.h"
 
 /**
- * Shallow water equation solver compute shader
- * Solves 2D height field and velocity field using finite difference
+ * SW Step 1: Advection (Semi-Lagrangian)
  */
-class FShallowWaterSolverCS : public FGlobalShader
+class FSWAdvectionCS : public FGlobalShader
 {
-	DECLARE_GLOBAL_SHADER(FShallowWaterSolverCS);
-	SHADER_USE_PARAMETER_STRUCT(FShallowWaterSolverCS, FGlobalShader);
+	DECLARE_GLOBAL_SHADER(FSWAdvectionCS);
+	SHADER_USE_PARAMETER_STRUCT(FSWAdvectionCS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER(int32, GridSize)
-		SHADER_PARAMETER(float, DeltaTime)
-		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(float, Gravity)
-		SHADER_PARAMETER(float, Viscosity)
+		SHADER_PARAMETER(uint32, GridSize)
+		SHADER_PARAMETER_SAMPLER(SamplerState, SourceTextureSampler)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, PrevHeightField)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, CurrentHeightField)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, PrevVelocityField)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, CurrentVelocityField)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};
+
+/**
+ * SW Step 2: Diffusion
+ */
+class FSWDiffusionCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FSWDiffusionCS);
+	SHADER_USE_PARAMETER_STRUCT(FSWDiffusionCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(uint32, GridSize)
+		SHADER_PARAMETER(float, Alpha)
+		SHADER_PARAMETER(float, Beta)
 		SHADER_PARAMETER(float, Damping)
-		SHADER_PARAMETER_UAV(RWStructuredBuffer<float>, HeightField)
-		SHADER_PARAMETER_UAV(RWStructuredBuffer<float2>, VelocityField)
-		SHADER_PARAMETER_UAV(RWStructuredBuffer<float>, OutHeightField)
-		SHADER_PARAMETER_UAV(RWStructuredBuffer<float2>, OutVelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, PrevHeightField)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentHeightField)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -51,13 +76,21 @@ class FWaterInteractionApplicationCS : public FGlobalShader
 	SHADER_USE_PARAMETER_STRUCT(FWaterInteractionApplicationCS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER(int32, GridSize)
+		SHADER_PARAMETER(uint32, GridSize)
 		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(float, InteractionStrength)
+		SHADER_PARAMETER(float2, GridOrigin)
+		SHADER_PARAMETER(float, InteractionDirectionalStrength)
+		SHADER_PARAMETER(float, InteractionOmniStrength)
+		SHADER_PARAMETER(float, InteractionVortexStrength)
 		SHADER_PARAMETER(float, InteractionRadius)
+		SHADER_PARAMETER(float, InteractionRadiusWidth)
+		SHADER_PARAMETER(float, InteractionGaussianFalloff)
+		SHADER_PARAMETER(uint32, InteractionShapeType)
+		SHADER_PARAMETER(uint32, InteractionEmissionTypeMask)
 		SHADER_PARAMETER(FVector2f, InteractionPosition)
-		SHADER_PARAMETER(FVector2f, InteractionForce)
-		SHADER_PARAMETER_UAV(RWStructuredBuffer<float2>, VelocityField)
+		SHADER_PARAMETER(FVector2f, InteractionDirection)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, HeightField)
+        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, VelocityField)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)

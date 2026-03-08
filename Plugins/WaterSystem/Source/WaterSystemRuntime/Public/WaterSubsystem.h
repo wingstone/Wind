@@ -65,8 +65,8 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UWaterInteractionComponent>> InteractionComponents;
 
-	/** Update scene extension on render thread */
-	void UpdateSceneExtension(float DeltaTime);
+	/** Update fluid configuration on render thread */
+	void UpdateFluidConfig(float DeltaTime);
 
 	/** Send interaction to render thread */
 	void SendInteraction(const FWaterInteractionData& Interaction);

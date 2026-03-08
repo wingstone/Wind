@@ -70,43 +70,40 @@ void UWaterSubsystem::UnregisterInteractionComponent(UWaterInteractionComponent*
 	}
 }
 
-FWaterFieldSceneExtension* UWaterSubsystem::GetSceneExtension() const
+void UWaterSubsystem::UpdateFluidConfig(float DeltaTime)
 {
-	if (UWorld* World = GetWorld())
+	if (GetWorld() && GetWorld()->Scene)
 	{
-		if (FSceneInterface* Scene = World->Scene)
-		{
-			// Get the scene extension - this would be registered by the renderer module
-			// For now, return nullptr as placeholder
-			// TODO: Implement proper scene extension retrieval
-			return nullptr;
-		}
+		ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
+		[WorldScene = GetWorld()->Scene, FluidConfig = FluidConfig](FRHICommandListImmediate& RHICmdList)
+			{
+				if (WorldScene->GetRenderScene())
+				{
+					if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
+					{
+						UE_LOG(LogWaterSystem, Log, TEXT("Updating fluid config on render thread"));
+						SceneExtension->SetConfig(FluidConfig);
+					}
+				}
+			});
 	}
-	return nullptr;
-}
-
-void UWaterSubsystem::UpdateSceneExtension(float DeltaTime)
-{
-	// Send configuration updates to render thread via ENQUEUE_RENDER_COMMAND
-	FWaterFluidConfig ConfigCopy = FluidConfig;
-	
-	ENQUEUE_RENDER_COMMAND(UpdateWaterConfig)(
-		[ConfigCopy](FRHICommandListImmediate& RHICmdList)
-		{
-			// TODO: Get scene extension from scene and update config
-			// SceneExtension->SetConfig(ConfigCopy);
-		});
 }
 
 void UWaterSubsystem::SendInteraction(const FWaterInteractionData& Interaction)
 {
-	// Copy interaction data
-	FWaterInteractionData InteractionCopy = Interaction;
-	
-	ENQUEUE_RENDER_COMMAND(AddWaterInteraction)(
-		[InteractionCopy](FRHICommandListImmediate& RHICmdList)
-		{
-			// TODO: Get scene extension and add interaction
-			// SceneExtension->AddInteraction(InteractionCopy);
-		});
+	if (GetWorld() && GetWorld()->Scene)
+	{
+		ENQUEUE_RENDER_COMMAND(SendInteraction)(
+		[WorldScene = GetWorld()->Scene, Interaction](FRHICommandListImmediate& RHICmdList)
+			{
+				if (WorldScene->GetRenderScene())
+				{
+					if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
+					{
+						UE_LOG(LogWaterSystem, Log, TEXT("Sending interaction on render thread"));
+						SceneExtension->AddInteraction(Interaction);
+					}
+				}
+			});
+	}
 }

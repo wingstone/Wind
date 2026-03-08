@@ -61,7 +61,7 @@ public:
 	
 	/** Interaction Gaussian falloff */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
-	float GaussianFalloff = 0.0f;
+	float GaussianFalloff = 0.0f; // Only used for disk shape
 
 
 protected:
@@ -73,5 +73,6 @@ private:
 	void RegisterWithSubsystem();
 	void UnregisterFromSubsystem();
 	void UpdateInteraction(float DeltaTime);
+	bool IsSubmerged(FVector CurrentPosition) const;
 	UWaterSubsystem* GetWaterSubsystem() const;
 };

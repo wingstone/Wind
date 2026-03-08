@@ -8,8 +8,6 @@ UWaterInteractionComponent::UWaterInteractionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	bAutoActivate = true;
-	TimeSinceLastSplash = 0.0f;
-	bWasSubmerged = false;
 }
 
 void UWaterInteractionComponent::BeginPlay()
@@ -35,7 +33,6 @@ void UWaterInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	UpdateInteraction(DeltaTime);
 
 	LastPosition = GetComponentLocation();
-	TimeSinceLastSplash += DeltaTime;
 }
 
 void UWaterInteractionComponent::RegisterWithSubsystem()
@@ -62,20 +59,10 @@ void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 
 	FVector CurrentPosition = GetComponentLocation();
 	FVector CurrentVelocity = (CurrentPosition - LastPosition) / DeltaTime;
-	bool bIsSubmerged = IsSubmerged();
-
-	// Check for splash (entering water)
-	if (bIsSubmerged && !bWasSubmerged)
-	{
-		float Speed = CurrentVelocity.Size();
-		if (Speed > SplashVelocityThreshold)
-		{
-			CreateSplash(SplashStrength * (Speed / SplashVelocityThreshold), InteractionRadius);
-		}
-	}
+	bool bIsSubmerged = IsSubmerged(CurrentPosition);
 
 	// Continuous wave generation
-	if (bIsSubmerged && bGenerateContinuousWaves)
+	if (bIsSubmerged)
 	{
 		FVector2D Velocity2D(CurrentVelocity.X, CurrentVelocity.Y);
 		float Speed2D = Velocity2D.Size();
@@ -83,40 +70,29 @@ void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 		if (Speed2D > 10.0f) // Minimum speed to generate waves
 		{
 			FWaterInteractionData Interaction;
-			Interaction.Position = FVector2D(CurrentPosition.X, CurrentPosition.Y);
-			Interaction.Force = Velocity2D.GetSafeNormal() * InteractionStrength;
-			Interaction.Radius = InteractionRadius;
-			Interaction.Strength = InteractionStrength * (Speed2D / 100.0f);
 
+			Interaction.Position = FVector2D(CurrentPosition.X, CurrentPosition.Y);
+			Interaction.Direction = Velocity2D.GetSafeNormal();
+			Interaction.RadiusParameter = FVector2D(Radius, Width);
+			Interaction.StrengthParameter = FVector3D(DisectionalStrength, OmniStrength, VortexStrength);
+			Interaction.GaussianFalloff = GaussianFalloff;
+			Interaction.ShapeType = ShapeType;
+			Interaction.EmissionType = EmissionType;
+			
 			WaterSys->ApplyInteraction(Interaction);
 		}
 	}
-
-	bWasSubmerged = bIsSubmerged;
-	LastVelocity = CurrentVelocity;
 }
 
-void UWaterInteractionComponent::CreateSplash(float Strength, float Radius)
+bool UWaterInteractionComponent::IsSubmerged(FVector CurrentPosition) const
 {
-	UWaterSubsystem* WaterSys = GetWaterSubsystem();
-	if (!WaterSys)
-		return;
+	if (UWaterSubsystem* WaterSys = GetWaterSubsystem())
+	{
+		const FWaterFluidConfig& Config = WaterSys->FluidConfig;
+		return CurrentPosition.Z < Config.WaterLevel;
+	}
 
-	FVector Position = GetComponentLocation();
-	FVector2D Position2D(Position.X, Position.Y);
-
-	WaterSys->CreateSplash(Position2D, Strength, Radius, 1.0f);
-	TimeSinceLastSplash = 0.0f;
-}
-
-bool UWaterInteractionComponent::IsSubmerged() const
-{
-	return false;
-}
-
-float UWaterInteractionComponent::GetSubmersionRatio() const
-{
-	return 0.0f;
+	return CurrentPosition.Z < 0;
 }
 
 UWaterSubsystem* UWaterInteractionComponent::GetWaterSubsystem() const

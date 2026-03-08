@@ -18,31 +18,16 @@
 
 #include "/Engine/Private/Common.ush"
 
+#if !defined(THREAD_GROUP_SIZE)
 #define THREAD_GROUP_SIZE 16
+#endif
 
-// Simulation parameters
-int GridSize;
-float DeltaTime;
-float CellSize;
-float Gravity;
-float Viscosity;
-float Damping;
-
-// Input fields (current state)
-RWStructuredBuffer<float> HeightField;
-RWStructuredBuffer<float2> VelocityField;
-
-// Output fields (next state)
-RWStructuredBuffer<float> OutHeightField;
-RWStructuredBuffer<float2> OutVelocityField;
-
-// Convert 2D grid coordinates to 1D buffer index
-int GridIndex(int2 Coord)
-{
-	// Clamp to grid bounds
-	Coord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
-	return Coord.y * GridSize + Coord.x;
-}
+uint GridSize;
+SamplerState LinearSampler;
+Texture2D<float> PrevHeightField;
+Texture2D<float> CurrentHeightField;
+RWTexture2D<float2> PrevVelocityField;
+RWTexture2D<float2> CurrentVelocityField;
 
 // Sample height field with boundary conditions
 float SampleHeight(int2 Coord)
@@ -56,18 +41,7 @@ float2 SampleVelocity(int2 Coord)
 	return VelocityField[GridIndex(Coord)];
 }
 
-// Compute Laplacian (∇²) for diffusion term
-float ComputeLaplacian(int2 Coord, RWStructuredBuffer<float> Field)
-{
-	float Center = Field[GridIndex(Coord)];
-	float Left   = Field[GridIndex(Coord + int2(-1, 0))];
-	float Right  = Field[GridIndex(Coord + int2(1, 0))];
-	float Up     = Field[GridIndex(Coord + int2(0, 1))];
-	float Down   = Field[GridIndex(Coord + int2(0, -1))];
-	
-	return (Left + Right + Up + Down - 4.0 * Center) / (CellSize * CellSize);
-}
-
+// Compute Laplacian (∇²) of velocity field for diffusion term
 float2 ComputeVelocityLaplacian(int2 Coord)
 {
 	float2 Center = SampleVelocity(Coord);

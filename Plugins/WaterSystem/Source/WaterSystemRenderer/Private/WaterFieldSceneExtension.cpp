@@ -27,33 +27,19 @@ bool FWaterFieldSceneExtension::ShouldCreateExtension(FScene& Scene)
 FWaterFieldSceneExtension::FWaterFieldSceneExtension(FScene& InScene)
 	: ISceneExtension(InScene)
 {
-	CachedWorld = InScene.GetWorld();
-	
-	// Default configuration
-	CurrentConfig.SolverType = EFluidSolverType::ShallowWater;
-	CurrentConfig.GridSize = 256;
-	CurrentConfig.WorldSize = 10000.0f;
-	CurrentConfig.Density = 1.0f;
-	CurrentConfig.Viscosity = 0.01f;
-	CurrentConfig.Damping = 0.02f;
-	CurrentConfig.Gravity = 980.0f;
-	CurrentConfig.SurfaceTension = 0.05f;
-	CurrentConfig.TimeStep = 0.016f;
 }
 
 FWaterFieldSceneExtension::~FWaterFieldSceneExtension()
 {
-	HeightFieldRT.SafeRelease();
-	VelocityFieldRT.SafeRelease();
-	TempHeightFieldRT.SafeRelease();
-	TempVelocityFieldRT.SafeRelease();
-	PressureFieldRT.SafeRelease();
-	DivergenceFieldRT.SafeRelease();
 }
 
 void FWaterFieldSceneExtension::InitExtension(FScene& InScene)
-{
-	// Initialization if needed
+{	
+	check(IsInGameThread());
+
+	Scene = &InScene;
+	UWaterSubsystem* SubSystem = UWaterSubsystem::GetSubsystem(Scene->GetWorld());
+	SubSystem->Reset();
 	UE_LOG(LogWaterFieldSceneExtension, Log, TEXT("WaterFieldSceneExtension initialized"));
 }
 
@@ -69,16 +55,84 @@ ISceneExtensionRenderer* FWaterFieldSceneExtension::CreateRenderer(
 	return new FRenderer(InSceneRenderer, *this);
 }
 
+void FWaterFieldSceneExtension::SetConfig_RenderThread(const FWaterFluidConfig& NewConfig)
+{
+	check(IsInRenderingThread());
+	CurrentConfig = NewConfig;
+}
+
+void FWaterFieldSceneExtension::AddInteraction_RenderThread(const FWaterInteractionData& Interaction)
+{
+	check(IsInRenderingThread());
+	CurrentInteractions.Add(Interaction);
+}
+
+void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate& RHICmdList, bool bNewEnable)
+{
+	check(IsInRenderingThread());
+
+	CurrentInteractions.Empty();
+	CurrentConfig.SolverType = EFluidSolverType::ShallowWater;
+	CurrentConfig.GridSize = 256;
+	CurrentConfig.WorldSize = 10000.0f;
+	CurrentConfig.Density = 1.0f;
+
+	HeightFieldRT.SafeRelease();
+	VelocityFieldRT.SafeRelease();
+	TempHeightFieldRT.SafeRelease();
+	TempVelocityFieldRT.SafeRelease();
+	PressureFieldRT.SafeRelease();
+	DivergenceFieldRT.SafeRelease();
+}
+
+
 // ============================================================================
 // FUpdater — fetch game-thread data for GPU upload
 // ============================================================================
 
-void FWaterFieldSceneExtension::FUpdater::PostGPUSceneUpdate(
-	FRDGBuilder& GraphBuilder,
-	FSceneUniformBuffer& SceneUniforms)
+void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder)
 {
-	// Fetch data from game thread proxy if needed
-	// TODO: Implement proxy communication
+	// Requires shader conversion to texture-based operations
+	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Shallow Water solver (stub)"));
+	
+}
+void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder)
+{
+	// TODO: Implement Navier-Stokes solver dispatch
+	// Requires shader conversion to texture-based operations
+	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Navier-Stokes solver (stub)"));
+}
+
+FORCEINLINE FPooledRenderTargetDesc CreateWindRenderTargetDesc(int32 RenderTargetSize, EPixelFormat Format = EPixelFormat::PF_R16F)
+{
+	return FPooledRenderTargetDesc::Create2DDesc(
+		FIntPoint(RenderTargetSize),
+		Format,
+		FClearValueBinding::None,
+		TexCreate_None,
+		TexCreate_ShaderResource | TexCreate_RenderTargetable | TexCreate_UAV,
+		false
+	);
+}
+
+void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms)
+{
+	if (Extension.CurrentConfig.SolverType == EFluidSolverType::ShallowWater)
+	{
+		if (!SceneData->HeightFieldRT.IsValid())
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(SceneData->RenderTargetSize), SceneData->HeightFieldRT, "HeightFieldRT");
+		}
+		if (SceneData->VelocityFieldRT.IsValid())
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(SceneData->RenderTargetSize, EPixelFormat::PF_G16R16F), SceneData->VelocityFieldRT, "VelocityFieldRT");
+		}
+		ExecuteShallowWaterSolver_RenderThread(GraphBuilder);
+	}
+	else
+	{
+		ExecuteNavierStokesSolver_RenderThread(GraphBuilder);
+	}
 }
 
 // ============================================================================
@@ -211,19 +265,6 @@ void FWaterFieldSceneExtension::FRenderer::DispatchWaterFieldCompute_RenderThrea
 	}
 
 	Extension.CurrentTime += Config.TimeStep;
-}
-
-void FWaterFieldSceneExtension::FRenderer::ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime)
-{
-	// TODO: Implement shallow water solver dispatch
-	// Requires shader conversion to texture-based operations
-	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Shallow Water solver (stub), dt=%.4f"), DeltaTime);
-}
-
-void FWaterFieldSceneExtension::FRenderer::ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime)
-{
-	// TODO: Implement Navier-Stokes solver dispatch
-	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Navier-Stokes solver (stub), dt=%.4f"), DeltaTime);
 }
 
 void FWaterFieldSceneExtension::FRenderer::ApplyInteractions_RenderThread(FRDGBuilder& GraphBuilder)

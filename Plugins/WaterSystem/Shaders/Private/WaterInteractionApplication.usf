@@ -6,27 +6,29 @@
 
 #include "/Engine/Private/Common.ush"
 
+#if !defined(THREAD_GROUP_SIZE)
 #define THREAD_GROUP_SIZE 16
+#endif
 
 int GridSize;
 float CellSize;
-float InteractionStrength;
+float2 GridOrigin;
+float InteractionDirectionalStrength;
+float InteractionOmniStrength;
+float InteractionVortexStrength;
 float InteractionRadius;
+float InteractionRadiusWidth;
+float InteractionGaussianFalloff;
+int InteractionShapeType;
+int InteractionEmissionTypeMask;
 float2 InteractionPosition;
-float2 InteractionForce;
-
-RWStructuredBuffer<float2> VelocityField;
-
-int GridIndex(int2 Coord)
-{
-	Coord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
-	return Coord.y * GridSize + Coord.x;
-}
+float3 InteractionDirection;
+RWTexture2D<float> HeightField;
+RWTexture2D<float2> VelocityField;
 
 float2 GridToWorld(int2 Coord)
 {
-	float2 Center = float2(GridSize / 2, GridSize / 2);
-	return (float2(Coord) - Center) * CellSize;
+	return Coord * CellSize + GridOrigin;
 }
 
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
@@ -38,20 +40,50 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		return;
 	
 	int Index = GridIndex(Coord);
-	
-	// Get world position of this cell
-	float2 WorldPos = GridToWorld(Coord);
-	
-	// Distance from interaction center
-	float Distance = length(WorldPos - InteractionPosition);
-	
-	// Apply force with Gaussian falloff
-	if (Distance < InteractionRadius)
+
+	float Falloff = 0.0f;
+	if (InteractionShapeType == 1) // Disk
 	{
-		float Falloff = exp(-Distance * Distance / (InteractionRadius * InteractionRadius * 0.5));
-		float2 Force = InteractionForce * InteractionStrength * Falloff;
-		
-		// Add to velocity
-		VelocityField[Index] += Force;
+		float2 WorldPos = GridToWorld(Coord);
+		float Distance = length(WorldPos - InteractionPosition);
+		if (Distance < InteractionRadius)
+		{
+			Falloff = exp(-Distance * Distance / (InteractionRadius * InteractionRadius * InteractionGaussianFalloff));
+		}
 	}
+	else if (InteractionShapeType == 2) // Ring
+	{
+		float2 WorldPos = GridToWorld(Coord);
+		float DistanceToCenter = length(WorldPos - InteractionPosition);
+		if (DistanceToCenter < InteractionRadius + InteractionRadiusWidth
+			&& DistanceToCenter > InteractionRadius - InteractionRadiusWidth)
+		{
+			float OutDistance = DistanceToCenter - InteractionRadius;
+			float InDistance = InteractionRadius - DistanceToCenter;
+			float Distance = max(OutDistance, InDistance);
+			Falloff = exp(-Distance * Distance / (InteractionRadius * InteractionRadius * InteractionGaussianFalloff));
+		}
+	}
+
+	const float HeightIntensity = 1.0f; // This can be exposed as a parameter if needed
+	float Height = InteractionOHeightIntensitymniStrength * Falloff;
+	HeightField[Coord] = HeightField[Coord] + Height;
+
+	float2 Velocity = 0.0f;
+	if (InteractionEmissionTypeMask & 0x1) // Directional
+	{
+		Velocity += InteractionDirection * InteractionDirectionalStrength * Falloff;
+	}
+	if (InteractionEmissionTypeMask & 0x2) // Omni
+	{
+		Velocity += InteractionDirection * InteractionOmniStrength * Falloff;
+	}
+	if (InteractionEmissionTypeMask & 0x4) // Vortex
+	{
+		float2 ToCenter = InteractionPosition - GridToWorld(Coord);
+		float2 TangentialDir = float2(-ToCenter.y, ToCenter.x);
+		TangentialDir = normalize(TangentialDir);
+		Velocity += TangentialDir * InteractionVortexStrength * Falloff;
+	}
+	VelocityField[Index] += Velocity;
 }

@@ -77,6 +77,10 @@ struct FWaterFluidConfig
 	/** Simulation time step (seconds) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.001", ClampMax = "0.1"))
 	float TimeStep = 0.016f;
+	
+	/** Initial water level (cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
+	float WaterLevel = 0.0f;
 };
 
 /** Player/object interaction data */
@@ -97,11 +101,11 @@ struct FWaterInteractionData
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
 	FVector2D RadiusParameter = FVector2D(100.0f, 0.0f);
 
-	/** Interaction strength  paramter: direction, omni, vortex */
+	/** Interaction strength paramter: direction, omni, vortex */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
 	FVector3D StrengthParameter = FVector3D(1.0f, 0.0f, 0.0f);
 
-	/** Interaction Gaussian falloff */
+	/** Interaction Gaussian falloff， Only used for disk shape */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
 	float GaussianFalloff = 0.0f;
 
