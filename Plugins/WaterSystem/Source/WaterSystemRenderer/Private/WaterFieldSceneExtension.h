@@ -33,7 +33,7 @@ public:
 	{
 		DECLARE_SCENE_EXTENSION_UPDATER(FUpdater, FWaterFieldSceneExtension);
 	public:
-		FUpdater(FWaterFieldSceneExtension& InExtension) : Extension(InExtension) {}
+		FUpdater(FWaterFieldSceneExtension* InExtension) : SceneData(InExtension) {}
 
 		//~ Begin ISceneExtensionUpdater Interface.
 		virtual void PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms) override;
@@ -44,7 +44,7 @@ public:
 		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder);
 
 	private:
-		FWaterFieldSceneExtension& Extension;
+		FWaterFieldSceneExtension* SceneData;
 	};
 
 	// ------------------------------------------------------------------
@@ -54,19 +54,14 @@ public:
 	{
 		DECLARE_SCENE_EXTENSION_RENDERER(FRenderer, FWaterFieldSceneExtension);
 	public:
-		FRenderer(FSceneRendererBase& InSceneRenderer, FWaterFieldSceneExtension& InExtension)
-			: ISceneExtensionRenderer(InSceneRenderer), Extension(InExtension) {}
+		FRenderer(FSceneRendererBase& InSceneRenderer, FWaterFieldSceneExtension* InExtension)
+			: ISceneExtensionRenderer(InSceneRenderer), SceneData(InExtension) {}
 
 		virtual void PreRender(FRDGBuilder& GraphBuilder) override;
+		virtual void UpdateSceneUniformBuffer(FRDGBuilder& GraphBuilder, FSceneUniformBuffer& Buffer) override;
 
 	private:
-		FWaterFieldSceneExtension& Extension;
-
-		void InitializeResources_RenderThread(FRDGBuilder& GraphBuilder);
-		void DispatchWaterFieldCompute_RenderThread(FRDGBuilder& GraphBuilder);
-		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime);
-		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, float DeltaTime);
-		void ApplyInteractions_RenderThread(FRDGBuilder& GraphBuilder);
+		FWaterFieldSceneExtension* SceneData;
 	};
 	
 	static bool ShouldCreateExtension(FScene& Scene);
@@ -85,8 +80,8 @@ public:
 private:
 
 	// --- GPU Resources (render thread owned) ---
-	TRefCountPtr<IPooledRenderTarget> HeightFieldRT;
-	TRefCountPtr<IPooledRenderTarget> VelocityFieldRT;
+	TRefCountPtr<IPooledRenderTarget> HeightFieldRT[3];
+	TRefCountPtr<IPooledRenderTarget> VelocityFieldRT[2];
 
 	TRefCountPtr<IPooledRenderTarget> TempHeightFieldRT;
 	TRefCountPtr<IPooledRenderTarget> TempVelocityFieldRT;
@@ -96,4 +91,8 @@ private:
 	// --- Current frame data (render thread) ---
 	TArray<FWaterInteractionData> CurrentInteractions;
 	FWaterFluidConfig CurrentConfig;
+	FVector2f WorldGridOrigin;
+
+	uint32 CurrentHeightIndex = 1;
+	uint32 CurrentVelocityIndex = 0;
 };

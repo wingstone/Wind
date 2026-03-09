@@ -23,22 +23,25 @@
 #endif
 
 uint GridSize;
+float CellSize;
+float2 GridOrigin;
+float DeltaTime;
 SamplerState LinearSampler;
-Texture2D<float> PrevHeightField;
 Texture2D<float> CurrentHeightField;
-RWTexture2D<float2> PrevVelocityField;
-RWTexture2D<float2> CurrentVelocityField;
+RWTexture2D<float> NextHeightField;
+Texture2D<float2> CurrentVelocityField;
+RWTexture2D<float2> NextVelocityField;
 
 // Sample height field with boundary conditions
 float SampleHeight(int2 Coord)
 {
-	return HeightField[GridIndex(Coord)];
+	return CurrentHeightField[Coord];
 }
 
 // Sample velocity field with boundary conditions
 float2 SampleVelocity(int2 Coord)
 {
-	return VelocityField[GridIndex(Coord)];
+	return CurrentVelocityField[Coord];
 }
 
 // Compute Laplacian (∇²) of velocity field for diffusion term
@@ -81,8 +84,18 @@ float ComputeVelocityDivergence(int2 Coord)
 	return dUdx + dVdy;
 }
 
+float2 GridToWorld(int2 Coord)
+{
+	return Coord * CellSize + GridOrigin;
+}
+
+float2 WorldToUV(float2 WorldPos)
+{
+	return (WorldPos - GridOrigin) / (CellSize * GridSize);
+}
+
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
-void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+void AdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	int2 Coord = int2(DispatchThreadId.xy);
 	
@@ -90,46 +103,50 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	if (Coord.x >= GridSize || Coord.y >= GridSize)
 		return;
 	
-	int Index = GridIndex(Coord);
-	
 	// Current state
-	float h = HeightField[Index];
-	float2 vel = VelocityField[Index];
+	float h = SampleHeight(Coord);
+	float2 vel = SampleVelocity(Coord);
 	
-	// Skip computation for cells with no water
-	if (abs(h) < 0.001 && length(vel) < 0.001)
-	{
-		OutHeightField[Index] = h;
-		OutVelocityField[Index] = vel;
-		return;
-	}
+	float2 WorldPos = GridToWorld(Coord);
 	
-	// --- Continuity Equation: ∂h/∂t = -∇·(h*v) ---
-	float div = ComputeVelocityDivergence(Coord);
-	float dhdt = -h * div;
+	// Trace backwards in time
+	float2 BackPos = WorldPos - vel * DeltaTime;
+	float2 uv = WorldToUV(BackPos);
 	
-	// --- Momentum Equations ---
-	float2 heightGrad = ComputeHeightGradient(Coord);
-	float2 velLaplacian = ComputeVelocityLaplacian(Coord);
-	
-	// ∂u/∂t = -g∂h/∂x + ν∇²u - ku
-	float2 dvdt = -Gravity * heightGrad + Viscosity * velLaplacian - Damping * vel;
-	
-	// --- Time Integration (Forward Euler) ---
-	float newHeight = h + dhdt * DeltaTime;
-	float2 newVelocity = vel + dvdt * DeltaTime;
-	
-	// Boundary conditions: zero velocity at edges
-	if (Coord.x == 0 || Coord.x == GridSize - 1 || Coord.y == 0 || Coord.y == GridSize - 1)
-	{
-		newVelocity = float2(0, 0);
-	}
-	
-	// Stability: clamp extreme values
-	newHeight = clamp(newHeight, -1000.0, 1000.0);
-	newVelocity = clamp(newVelocity, -500.0, 500.0);
+	// Sample velocity at back-traced position
+	float newHeight = Texture2DSampleLevel(CurrentHeightField, LinearSampler, uv, 0);
+	float2 newVel = Texture2DSampleLevel(CurrentVelocityField, LinearSampler, uv, 0);
 	
 	// Write output
-	OutHeightField[Index] = newHeight;
-	OutVelocityField[Index] = newVelocity;
+	NextHeightField[Index] = newHeight;
+	NextVelocityField[Index] = newVel;
+}
+
+Texture2D<float> PrevHeightField;
+float Alpha;
+float Beta;
+float Damping;
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	// Boundary check
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	// Current state
+	float h = SampleHeight(Coord);
+	float up_h = SampleHeight(Coord + int2(0, 1));
+	float down_h = SampleHeight(Coord + int2(0, -1));
+	float left_h = SampleHeight(Coord + int2(-1, 0));
+	float right_h = SampleHeight(Coord + int2(1, 0));
+
+	float prev_h = PrevHeightField[Coord];
+
+	float newHeight = Damping* ( h + Beta * (h - prev_h) + Alpha * (up_h + down_h + left_h + right_h - 4.0 * h));
+	
+	// Write output
+	CurrentHeightField[Index] = newHeight;
 }
