@@ -75,6 +75,7 @@ private:
 
 	void RegisterWithSubsystem();
 	void UnregisterFromSubsystem();
+	
 	void UpdateInteraction(float DeltaTime);
 	bool IsSubmerged(FVector CurrentPosition) const;
 	UWaterSubsystem* GetWaterSubsystem() const;

@@ -1,9 +1,12 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "WaterSubsystem.h"
+#include "WaterFieldSceneExtension.h"
 #include "WaterInteractionComponent.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "SceneInterface.h"
+#include "ScenePrivate.h"
 #include "RendererInterface.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWaterSystem, Log, All);
@@ -21,8 +24,6 @@ void UWaterSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UWaterSubsystem::Deinitialize()
 {
-	InteractionComponents.Empty();
-
 	Super::Deinitialize();
 }
 
@@ -33,8 +34,50 @@ void UWaterSubsystem::Tick(float DeltaTime)
 	if (!bEnableSimulation)
 		return;
 
-	// Update scene extension on render thread
-	UpdateFluidConfig(DeltaTime);
+	// Get view location
+	FVector ViewLocation = FVector::ZeroVector;
+	if (UWorld* World = GetWorld())
+	{
+		APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
+		if (PlayerController != nullptr)
+		{
+			ViewLocation = PlayerController->PlayerCameraManager->GetCameraLocation();
+		}
+		else
+		{
+			auto ViewLocations = World->ViewLocationsRenderedLastFrame;
+			if (ViewLocations.Num() > 0)
+			{
+				ViewLocation = ViewLocations[0];
+			}
+		}
+	}
+	
+	// Update scrolling origin if view has moved significantly to maintain precision
+	if (FVector::DistSquared(ViewLocation, LastViewLocation) > FMath::Square(FluidConfig.WorldSize * 0.25f))
+	{
+		if (GetWorld() && GetWorld()->Scene)
+		{
+			FVector Delta = ViewLocation - LastViewLocation;
+			FVector2f ScrollOffset(static_cast<float>(Delta.X), static_cast<float>(Delta.Y));
+			ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
+			[WorldScene = GetWorld()->Scene, ScrollOffset = ScrollOffset](FRHICommandListImmediate& RHICmdList)
+				{
+					if (WorldScene->GetRenderScene())
+					{
+						if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
+						{
+							UE_LOG(LogWaterSystem, Log, TEXT("Updating fluid config on render thread"));
+							SceneExtension->SetScrollOffset_RenderThread(ScrollOffset);
+						}
+					}
+				});
+
+			LastViewLocation = ViewLocation;
+		}
+	}
+	
+	UpdateInteractions();
 }
 
 TStatId UWaterSubsystem::GetStatId() const
@@ -49,28 +92,20 @@ bool UWaterSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) con
 
 void UWaterSubsystem::ApplyInteraction(const FWaterInteractionData& Interaction)
 {
-	SendInteraction(Interaction);
+	PendingInteractions.Add(Interaction);
 }
 
 void UWaterSubsystem::RegisterInteractionComponent(UWaterInteractionComponent* Component)
 {
-	if (Component && !InteractionComponents.Contains(Component))
-	{
-		InteractionComponents.Add(Component);
-		UE_LOG(LogWaterSystem, Verbose, TEXT("Registered interaction component: %s"), *Component->GetName());
-	}
+	// No-op: interactions are applied per-frame via ApplyInteraction
 }
 
 void UWaterSubsystem::UnregisterInteractionComponent(UWaterInteractionComponent* Component)
 {
-	if (Component)
-	{
-		InteractionComponents.Remove(Component);
-		UE_LOG(LogWaterSystem, Verbose, TEXT("Unregistered interaction component: %s"), *Component->GetName());
-	}
+	// No-op: interactions are applied per-frame via ApplyInteraction
 }
 
-void UWaterSubsystem::UpdateFluidConfig(float DeltaTime)
+void UWaterSubsystem::UpdateFluidConfig()
 {
 	if (GetWorld() && GetWorld()->Scene)
 	{
@@ -82,26 +117,25 @@ void UWaterSubsystem::UpdateFluidConfig(float DeltaTime)
 					if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
 					{
 						UE_LOG(LogWaterSystem, Log, TEXT("Updating fluid config on render thread"));
-						SceneExtension->SetConfig(FluidConfig);
+						SceneExtension->SetConfig_RenderThread(FluidConfig);
 					}
 				}
 			});
 	}
 }
 
-void UWaterSubsystem::SendInteraction(const FWaterInteractionData& Interaction)
+void UWaterSubsystem::UpdateInteractions()
 {
 	if (GetWorld() && GetWorld()->Scene)
 	{
-		ENQUEUE_RENDER_COMMAND(SendInteraction)(
-		[WorldScene = GetWorld()->Scene, Interaction](FRHICommandListImmediate& RHICmdList)
+		ENQUEUE_RENDER_COMMAND(UpdateInteractions)(
+		[WorldScene = GetWorld()->Scene, PendingInteractions = PendingInteractions](FRHICommandListImmediate& RHICmdList) 
 			{
 				if (WorldScene->GetRenderScene())
 				{
 					if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
 					{
-						UE_LOG(LogWaterSystem, Log, TEXT("Sending interaction on render thread"));
-						SceneExtension->AddInteraction(Interaction);
+						SceneExtension->SetPendingInteractions_RenderThread(PendingInteractions);
 					}
 				}
 			});

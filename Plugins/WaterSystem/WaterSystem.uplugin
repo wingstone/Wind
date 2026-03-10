@@ -20,11 +20,6 @@
 			"LoadingPhase": "PostConfigInit"
 		},
 		{
-			"Name": "WaterSystemRenderer",
-			"Type": "Runtime",
-			"LoadingPhase": "PostConfigInit"
-		},
-		{
 			"Name": "WaterSystemEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"

@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "WaterFieldSceneExtension.h"
+#include "WaterSubsystem.h"
 #include "WaterFieldShaders.h"
 //#include "WaterFieldProxy.h"
 #include "ScenePrivate.h"
@@ -37,9 +38,8 @@ void FWaterFieldSceneExtension::InitExtension(FScene& InScene)
 {	
 	check(IsInGameThread());
 
-	Scene = &InScene;
-	UWaterSubsystem* SubSystem = UWaterSubsystem::GetSubsystem(Scene->GetWorld());
-	SubSystem->Reset();
+	UWaterSubsystem* SubSystem = Scene.GetWorld()->GetSubsystem<UWaterSubsystem>();
+	SubSystem->ResetState();
 	UE_LOG(LogWaterFieldSceneExtension, Log, TEXT("WaterFieldSceneExtension initialized"));
 }
 
@@ -61,10 +61,16 @@ void FWaterFieldSceneExtension::SetConfig_RenderThread(const FWaterFluidConfig& 
 	CurrentConfig = NewConfig;
 }
 
-void FWaterFieldSceneExtension::AddInteraction_RenderThread(const FWaterInteractionData& Interaction)
+void FWaterFieldSceneExtension::SetScrollOffset_RenderThread(const FVector2f& NewScrollOffset)
 {
 	check(IsInRenderingThread());
-	CurrentInteractions.Add(Interaction);
+	ScrollOffset = NewScrollOffset;	
+}
+
+void FWaterFieldSceneExtension::SetPendingInteractions_RenderThread(const TArray<FWaterInteractionData>& PendingInteractions)
+{
+	check(IsInRenderingThread());
+	CurrentInteractions.Append(PendingInteractions);
 }
 
 void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate& RHICmdList, bool bNewEnable)
@@ -76,7 +82,10 @@ void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate
 	CurrentConfig.GridSize = 256;
 	CurrentConfig.WorldSize = 10000.0f;
 	CurrentConfig.Density = 1.0f;
-	
+
+	WorldGridOrigin = FVector2f::ZeroVector;
+	ScrollOffset = FVector2f::ZeroVector;
+
 	bEnableSimulation = bNewEnable;
 
 	for (uint32 Index = 0; Index < UE_ARRAY_COUNT(HeightFieldRT); ++Index)
@@ -96,8 +105,120 @@ void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate
 }
 
 // ============================================================================
+// Helper
+// ============================================================================
+
+FORCEINLINE FPooledRenderTargetDesc CreateWindRenderTargetDesc(FIntPoint RenderTargetSize, EPixelFormat Format = EPixelFormat::PF_R16F)
+{
+	return FPooledRenderTargetDesc::Create2DDesc(
+		RenderTargetSize,
+		Format,
+		FClearValueBinding::None,
+		TexCreate_None,
+		TexCreate_ShaderResource | TexCreate_RenderTargetable | TexCreate_UAV,
+		false
+	);
+}
+
+// ============================================================================
 // FUpdater — fetch game-thread data for GPU upload
 // ============================================================================
+
+void FWaterFieldSceneExtension::FUpdater::ApplyScroll(FRDGBuilder& GraphBuilder)
+{
+	check(IsInRenderingThread());
+
+	const FWaterFluidConfig& Config = SceneData->CurrentConfig;
+	const uint32 GridSize = FMath::Max(Config.GridSize, 1);
+	const float CellSize = Config.WorldSize / static_cast<float>(GridSize);
+
+	// Quantize scroll to integer texel boundaries
+	FIntPoint TexelOffset(
+		FMath::RoundToInt32(SceneData->ScrollOffset.X / CellSize),
+		FMath::RoundToInt32(SceneData->ScrollOffset.Y / CellSize));
+
+	if (TexelOffset.X == 0 && TexelOffset.Y == 0)
+	{
+		SceneData->ScrollOffset = FVector2f::ZeroVector;
+		return;
+	}
+
+	// Update world grid origin by the quantized amount
+	SceneData->WorldGridOrigin += FVector2f(static_cast<float>(TexelOffset.X), static_cast<float>(TexelOffset.Y)) * CellSize;
+	SceneData->ScrollOffset = FVector2f::ZeroVector;
+
+	UE_LOG(LogWaterFieldSceneExtension, Log, TEXT("Scrolling water grid by (%d, %d) texels, new origin: (%.1f, %.1f)"),
+		TexelOffset.X, TexelOffset.Y, SceneData->WorldGridOrigin.X, SceneData->WorldGridOrigin.Y);
+
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneData->Scene.GetFeatureLevel());
+	const FIntPoint GridExtent(GridSize, GridSize);
+	const FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(GridExtent, FIntPoint(16, 16));
+
+	// Ensure temp textures exist for the swap
+	GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->TempHeightFieldRT, TEXT("TempHeightFieldRT"));
+	GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->TempVelocityFieldRT, TEXT("TempVelocityFieldRT"));
+
+	// Scroll all 3 height field textures
+	{
+		const TShaderMapRef<FWaterScrollHeightCS> ScrollCS(GlobalShaderMap);
+
+		for (uint32 i = 0; i < 3; i++)
+		{
+			if (!SceneData->HeightFieldRT[i]) continue;
+
+			FRDGTextureRef Source = GraphBuilder.RegisterExternalTexture(SceneData->HeightFieldRT[i]);
+			FRDGTextureRef Dest = GraphBuilder.RegisterExternalTexture(SceneData->TempHeightFieldRT);
+
+			FWaterScrollHeightCS::FParameters* Params = GraphBuilder.AllocParameters<FWaterScrollHeightCS::FParameters>();
+			Params->GridSize = GridSize;
+			Params->ScrollTexelOffsetX = TexelOffset.X;
+			Params->ScrollTexelOffsetY = TexelOffset.Y;
+			Params->SourceTexture = GraphBuilder.CreateSRV(Source);
+			Params->DestHeightTexture = GraphBuilder.CreateUAV(Dest);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("Water.ScrollHeight_%d", i),
+				ERDGPassFlags::Compute,
+				ScrollCS,
+				Params,
+				GroupCount);
+
+			// Swap so HeightFieldRT[i] now points to the scrolled result
+			Swap(SceneData->HeightFieldRT[i], SceneData->TempHeightFieldRT);
+		}
+	}
+
+	// Scroll both velocity field textures
+	{
+		const TShaderMapRef<FWaterScrollVelocityCS> ScrollCS(GlobalShaderMap);
+
+		for (uint32 i = 0; i < 2; i++)
+		{
+			if (!SceneData->VelocityFieldRT[i]) continue;
+
+			FRDGTextureRef Source = GraphBuilder.RegisterExternalTexture(SceneData->VelocityFieldRT[i]);
+			FRDGTextureRef Dest = GraphBuilder.RegisterExternalTexture(SceneData->TempVelocityFieldRT);
+
+			FWaterScrollVelocityCS::FParameters* Params = GraphBuilder.AllocParameters<FWaterScrollVelocityCS::FParameters>();
+			Params->GridSize = GridSize;
+			Params->ScrollTexelOffsetX = TexelOffset.X;
+			Params->ScrollTexelOffsetY = TexelOffset.Y;
+			Params->SourceTexture = GraphBuilder.CreateSRV(Source);
+			Params->DestVelocityTexture = GraphBuilder.CreateUAV(Dest);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("Water.ScrollVelocity_%d", i),
+				ERDGPassFlags::Compute,
+				ScrollCS,
+				Params,
+				GroupCount);
+
+			Swap(SceneData->VelocityFieldRT[i], SceneData->TempVelocityFieldRT);
+		}
+	}
+}
 
 void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder)
 {
@@ -108,12 +229,12 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 		return;
 	}
 
-	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneData->Scene->GetFeatureLevel());
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneData->Scene.GetFeatureLevel());
 
 	const FWaterFluidConfig& Config = SceneData->CurrentConfig;
 	const uint32 GridSize = FMath::Max(Config.GridSize, 1);
 	const float CellSize = Config.WorldSize / static_cast<float>(GridSize);
-	const FVector2f GridOrigin(-0.5f * Config.WorldSize, -0.5f * Config.WorldSize);
+	const FVector2f GridOrigin(SceneData->WorldGridOrigin - FVector2f(0.5f * Config.WorldSize));
 	const FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(FIntPoint(GridSize, GridSize), FIntPoint(16, 16));
 
 
@@ -213,18 +334,6 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Navier-Stokes solver (stub)"));
 }
 
-FORCEINLINE FPooledRenderTargetDesc CreateWindRenderTargetDesc(FIntPoint RenderTargetSize, EPixelFormat Format = EPixelFormat::PF_R16F)
-{
-	return FPooledRenderTargetDesc::Create2DDesc(
-		RenderTargetSize,
-		Format,
-		FClearValueBinding::None,
-		TexCreate_None,
-		TexCreate_ShaderResource | TexCreate_RenderTargetable | TexCreate_UAV,
-		false
-	);
-}
-
 void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms)
 {
 	const FWaterFluidConfig& Config = SceneData->CurrentConfig;
@@ -232,6 +341,8 @@ void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuild
 
 	if (SceneData->CurrentConfig.SolverType == EFluidSolverType::ShallowWater)
 	{
+		const bool bTexturesExist = SceneData->HeightFieldRT[0].IsValid();
+
 		for (uint32 i = 0; i < 3; i++)
 		{
 			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->HeightFieldRT[i], TEXT("HeightFieldRT"));
@@ -241,7 +352,26 @@ void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuild
 		{
 			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->VelocityFieldRT[i], TEXT("VelocityFieldRT"));
 		}
-		
+
+		// Apply pending scroll before simulation
+		if (!SceneData->ScrollOffset.IsNearlyZero())
+		{
+			if (bTexturesExist)
+			{
+				ApplyScroll(GraphBuilder);
+			}
+			else
+			{
+				// Textures just created — no data to scroll, just update origin
+				const float CellSize = Config.WorldSize / static_cast<float>(FMath::Max(Config.GridSize, 1));
+				FIntPoint TexelOffset(
+					FMath::RoundToInt32(SceneData->ScrollOffset.X / CellSize),
+					FMath::RoundToInt32(SceneData->ScrollOffset.Y / CellSize));
+				SceneData->WorldGridOrigin += FVector2f(static_cast<float>(TexelOffset.X), static_cast<float>(TexelOffset.Y)) * CellSize;
+				SceneData->ScrollOffset = FVector2f::ZeroVector;
+			}
+		}
+
 		ExecuteShallowWaterSolver_RenderThread(GraphBuilder);
 	}
 	else
@@ -259,7 +389,7 @@ void FWaterFieldSceneExtension::FUpdater::PostSceneUpdate(FRDGBuilder& GraphBuil
 // -------------------------- Render -----------------------//
 
 
-BEGIN_SHADER_PARAMETER_STRUCT(FWaterSimulationParameters, WATERSYSTEMRENDERER_API)
+BEGIN_SHADER_PARAMETER_STRUCT(FWaterSimulationParameters, WATERSYSTEMRUNTIME_API)
 	SHADER_PARAMETER(FVector4f, UVScaleOffset)
 	SHADER_PARAMETER(FVector4f, WaterMapSizeAndInv)
 	SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, WaterHeightMapTexture)
@@ -268,7 +398,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FWaterSimulationParameters, WATERSYSTEMRENDERER_AP
 	SHADER_PARAMETER_SAMPLER(SamplerState, WaterVelocityMapTextureSampler)
 END_SHADER_PARAMETER_STRUCT()
 
-DECLARE_SCENE_UB_STRUCT(FWaterSimulationParameters, WaterSimulation, WATERSYSTEMRENDERER_API)
+DECLARE_SCENE_UB_STRUCT(FWaterSimulationParameters, WaterSimulation, WATERSYSTEMRUNTIME_API)
 
 namespace WaterSimulation
 {
@@ -294,9 +424,11 @@ void FWaterFieldSceneExtension::FRenderer::UpdateSceneUniformBuffer(FRDGBuilder&
 	check(IsInRenderingThread());
 
 	FWaterSimulationParameters Parameters;
-	FVector2f GridOffset = SceneData->WorldGridOrigin / SceneData->CurrentConfig.WorldSize;
+	// UV = (WorldPos - GridBottomLeft) / WorldSize
+	//    = WorldPos / WorldSize - WorldGridOrigin / WorldSize + 0.5
+	FVector2f UVOffset = FVector2f(0.5f) - SceneData->WorldGridOrigin / SceneData->CurrentConfig.WorldSize;
 
-	Parameters.UVScaleOffset = FVector4f(1.0f / SceneData->CurrentConfig.WorldSize, 1.0f / SceneData->CurrentConfig.WorldSize, GridOffset.X, GridOffset.Y);
+	Parameters.UVScaleOffset = FVector4f(1.0f / SceneData->CurrentConfig.WorldSize, 1.0f / SceneData->CurrentConfig.WorldSize, UVOffset.X, UVOffset.Y);
 
 	Parameters.WaterMapSizeAndInv = FVector4f(SceneData->CurrentConfig.GridSize, SceneData->CurrentConfig.GridSize, 1.0f / SceneData->CurrentConfig.GridSize, 1.0f / SceneData->CurrentConfig.GridSize);
 

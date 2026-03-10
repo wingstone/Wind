@@ -39,38 +39,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Fluid")
 	bool bEnableSimulation = true;
 
-	/** Simulation quality (substeps per frame) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Fluid", meta = (ClampMin = "1", ClampMax = "10"))
-	int32 SimulationSubsteps = 2;
-
-	// --- Interaction Management ---
-
-	/** Apply continuous interaction (called by WaterInteractionComponent) */
 	void ApplyInteraction(const FWaterInteractionData& Interaction);
-
-	/** Register an interaction component */
-	void RegisterInteractionComponent(UWaterInteractionComponent* Component);
-
-	/** Unregister an interaction component */
-	void UnregisterInteractionComponent(UWaterInteractionComponent* Component);
-
-	/** Get all registered interaction components */
-	const TArray<UWaterInteractionComponent*>& GetInteractionComponents() const { return InteractionComponents; }
-
-	/** Get scene extension (for rendering thread) */
-	FWaterFieldSceneExtension* GetSceneExtension() const;
-	
 	void ResetState();
 
+	void RegisterInteractionComponent(UWaterInteractionComponent* Component);
+	void UnregisterInteractionComponent(UWaterInteractionComponent* Component);
+
+	FWaterFieldSceneExtension* GetSceneExtension() const;
+
 private:
-	/** All registered interaction components */
-	UPROPERTY()
-	TArray<TObjectPtr<UWaterInteractionComponent>> InteractionComponents;
+
+	TArray<FWaterInteractionData> PendingInteractions;
+	FVector LastViewLocation = FVector::ZeroVector;
 
 	/** Update fluid configuration on render thread */
-	void UpdateFluidConfig(float DeltaTime);
+	void UpdateFluidConfig();
 
 	/** Send interaction to render thread */
-	void SendInteraction(const FWaterInteractionData& Interaction);
-
+	void UpdateInteractions();
 };

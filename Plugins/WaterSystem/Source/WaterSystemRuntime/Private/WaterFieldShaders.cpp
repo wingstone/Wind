@@ -3,6 +3,10 @@
 #include "WaterFieldShaders.h"
 #include "ShaderCore.h"
 
+// Water Scroll
+IMPLEMENT_GLOBAL_SHADER(FWaterScrollHeightCS, "/Plugin/WaterSystem/Private/WaterScroll.usf", "ScrollHeightCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FWaterScrollVelocityCS, "/Plugin/WaterSystem/Private/WaterScroll.usf", "ScrollVelocityCS", SF_Compute);
+
 // Shallow Water Equations Solver
 IMPLEMENT_GLOBAL_SHADER(FSWAdvectionCS, "/Plugin/WaterSystem/Private/ShallowWaterSolver.usf", "AdvectionCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FSWDiffusionCS, "/Plugin/WaterSystem/Private/ShallowWaterSolver.usf", "DiffusionCS", SF_Compute);

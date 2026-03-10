@@ -22,7 +22,7 @@ class FSceneUniformBuffer;
  */
 class FWaterFieldSceneExtension : public ISceneExtension
 {
-	DECLARE_SCENE_EXTENSION(WATERSYSTEMRENDERER_API, FWaterFieldSceneExtension);
+	DECLARE_SCENE_EXTENSION(WATERSYSTEMRUNTIME_API, FWaterFieldSceneExtension);
 
 public:
 
@@ -42,6 +42,7 @@ public:
 
 		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder);
 		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder);
+		void ApplyScroll(FRDGBuilder& GraphBuilder);
 
 	private:
 		FWaterFieldSceneExtension* SceneData;
@@ -75,7 +76,8 @@ public:
 	virtual ISceneExtensionRenderer* CreateRenderer(FSceneRendererBase& InSceneRenderer, const FEngineShowFlags& EngineShowFlags) override;
 
 	void SetConfig_RenderThread(const FWaterFluidConfig& NewConfig);
-	void AddInteraction_RenderThread(const FWaterInteractionData& Interaction);
+	void SetScrollOffset_RenderThread(const FVector2f& NewScrollOffset);
+	void SetPendingInteractions_RenderThread(const TArray<FWaterInteractionData>& PendingInteractions);
 	void ResetState_RenderThread(FRHICommandListImmediate& RHICmdList, bool bNewEnable);
 
 private:
@@ -93,6 +95,7 @@ private:
 	TArray<FWaterInteractionData> CurrentInteractions;
 	FWaterFluidConfig CurrentConfig;
 	FVector2f WorldGridOrigin;
+	FVector2f ScrollOffset;
 
 	bool bEnableSimulation = false;
 	uint32 CurrentHeightIndex = 1;

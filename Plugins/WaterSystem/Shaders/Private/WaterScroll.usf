@@ -1,0 +1,65 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	WaterScroll.usf: Scroll water simulation textures when grid origin moves
+	
+	Copies texture data with an integer texel offset, zeroing newly exposed
+	regions where no source data exists.
+=============================================================================*/
+
+#include "/Engine/Private/Common.ush"
+
+#if !defined(THREAD_GROUP_SIZE)
+#define THREAD_GROUP_SIZE 16
+#endif
+
+uint GridSize;
+int ScrollTexelOffsetX;
+int ScrollTexelOffsetY;
+Texture2D SourceTexture;
+
+// --- Height scroll (R16F) ---
+
+RWTexture2D<float> DestHeightTexture;
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void ScrollHeightCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	if (any(Coord >= (int)GridSize))
+		return;
+
+	int2 Src = Coord + int2(ScrollTexelOffsetX, ScrollTexelOffsetY);
+
+	if (all(Src >= 0) && all(Src < (int)GridSize))
+	{
+		DestHeightTexture[Coord] = SourceTexture[Src].r;
+	}
+	else
+	{
+		DestHeightTexture[Coord] = 0.0f;
+	}
+}
+
+// --- Velocity scroll (RG16F) ---
+
+RWTexture2D<float2> DestVelocityTexture;
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void ScrollVelocityCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	if (any(Coord >= (int)GridSize))
+		return;
+
+	int2 Src = Coord + int2(ScrollTexelOffsetX, ScrollTexelOffsetY);
+
+	if (all(Src >= 0) && all(Src < (int)GridSize))
+	{
+		DestVelocityTexture[Coord] = SourceTexture[Src].rg;
+	}
+	else
+	{
+		DestVelocityTexture[Coord] = float2(0.0f, 0.0f);
+	}
+}

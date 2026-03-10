@@ -23,9 +23,9 @@ class FSWAdvectionCS : public FGlobalShader
 		SHADER_PARAMETER(float, DeltaTime)
 		SHADER_PARAMETER_SAMPLER(SamplerState, SourceTextureSampler)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentHeightField)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentVelocityField)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextVelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextVelocityField)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -57,7 +57,63 @@ class FSWDiffusionCS : public FGlobalShader
 		SHADER_PARAMETER(float, Damping)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, PrevHeightField)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentHeightField)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};
+
+/**
+ * Scroll height field texture with integer texel offset
+ */
+class FWaterScrollHeightCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FWaterScrollHeightCS);
+	SHADER_USE_PARAMETER_STRUCT(FWaterScrollHeightCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(uint32, GridSize)
+		SHADER_PARAMETER(int32, ScrollTexelOffsetX)
+		SHADER_PARAMETER(int32, ScrollTexelOffsetY)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, SourceTexture)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, DestHeightTexture)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};
+
+/**
+ * Scroll velocity field texture with integer texel offset
+ */
+class FWaterScrollVelocityCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FWaterScrollVelocityCS);
+	SHADER_USE_PARAMETER_STRUCT(FWaterScrollVelocityCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(uint32, GridSize)
+		SHADER_PARAMETER(int32, ScrollTexelOffsetX)
+		SHADER_PARAMETER(int32, ScrollTexelOffsetY)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, SourceTexture)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, DestVelocityTexture)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -94,8 +150,8 @@ class FWaterInteractionApplicationCS : public FGlobalShader
 		SHADER_PARAMETER(uint32, InteractionEmissionTypeMask)
 		SHADER_PARAMETER(FVector2f, InteractionPosition)
 		SHADER_PARAMETER(FVector2f, InteractionDirection)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, HeightField)
-        SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, VelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, HeightField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, VelocityField)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)

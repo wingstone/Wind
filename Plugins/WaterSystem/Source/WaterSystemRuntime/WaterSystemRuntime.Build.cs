@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
+using System.IO;
 
 public class WaterSystemRuntime : ModuleRules
 {
@@ -8,18 +9,23 @@ public class WaterSystemRuntime : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+		// Access Renderer private/internal headers for Scene Extension API
+		PrivateIncludePaths.Add(Path.Combine(EngineDirectory, "Source", "Runtime", "Renderer", "Private"));
+		PrivateIncludePaths.Add(Path.Combine(EngineDirectory, "Source", "Runtime", "Renderer", "Internal"));
+
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
 			"CoreUObject",
 			"Engine",
-			"RenderCore",
-			"RHI",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"Projects",
+			"RenderCore",
+			"Renderer",
+			"RHI",
+			"Projects"
 		});
 	}
 }

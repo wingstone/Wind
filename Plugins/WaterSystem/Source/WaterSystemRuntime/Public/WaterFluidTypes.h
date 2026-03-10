@@ -77,6 +77,10 @@ struct FWaterFluidConfig
 	/** Simulation time step (seconds) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.001", ClampMax = "0.1"))
 	float TimeStep = 0.016f;
+
+	/** Simulation quality (substeps per frame) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "1", ClampMax = "10"))
+	int32 SimulationSubsteps = 2;
 	
 	/** Initial water level (cm) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
