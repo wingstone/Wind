@@ -34,7 +34,7 @@ void UWaterSubsystem::Tick(float DeltaTime)
 		return;
 
 	// Update scene extension on render thread
-	UpdateSceneExtension(DeltaTime);
+	UpdateFluidConfig(DeltaTime);
 }
 
 TStatId UWaterSubsystem::GetStatId() const
@@ -102,6 +102,26 @@ void UWaterSubsystem::SendInteraction(const FWaterInteractionData& Interaction)
 					{
 						UE_LOG(LogWaterSystem, Log, TEXT("Sending interaction on render thread"));
 						SceneExtension->AddInteraction(Interaction);
+					}
+				}
+			});
+	}
+}
+
+
+void UWaterSubsystem::ResetState()
+{
+	if (GetWorld() && GetWorld()->Scene)
+	{
+		ENQUEUE_RENDER_COMMAND(UWaterSubsystem_ResetState)(
+		[WorldScene = GetWorld()->Scene, bEnableSimulation = bEnableSimulation](FRHICommandListImmediate& RHICmdList)
+			{
+				if (WorldScene->GetRenderScene())
+				{
+					if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
+					{
+						UE_LOG(LogWaterSystem, Log, TEXT("Resetting state on render thread"));
+						SceneExtension->ResetState_RenderThread(RHICmdList, bEnableSimulation);
 					}
 				}
 			});

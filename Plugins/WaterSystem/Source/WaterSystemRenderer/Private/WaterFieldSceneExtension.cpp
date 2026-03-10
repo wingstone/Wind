@@ -76,9 +76,19 @@ void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate
 	CurrentConfig.GridSize = 256;
 	CurrentConfig.WorldSize = 10000.0f;
 	CurrentConfig.Density = 1.0f;
+	
+	bEnableSimulation = bNewEnable;
 
-	HeightFieldRT.SafeRelease();
-	VelocityFieldRT.SafeRelease();
+	for (uint32 Index = 0; Index < UE_ARRAY_COUNT(HeightFieldRT); ++Index)
+	{
+		HeightFieldRT[Index].SafeRelease();
+	}
+
+	for (uint32 Index = 0; Index < UE_ARRAY_COUNT(VelocityFieldRT); ++Index)
+	{
+		VelocityFieldRT[Index].SafeRelease();
+	}
+
 	TempHeightFieldRT.SafeRelease();
 	TempVelocityFieldRT.SafeRelease();
 	PressureFieldRT.SafeRelease();
@@ -113,8 +123,8 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 	FRDGTextureRef VelocityCurrent = GraphBuilder.RegisterExternalTexture(SceneData->VelocityFieldRT[SceneData->CurrentVelocityIndex], TEXT("Water.Velocity.Current"));
 	FRDGTextureRef VelocityNext = GraphBuilder.RegisterExternalTexture(SceneData->VelocityFieldRT[(SceneData->CurrentVelocityIndex + 1)%2], TEXT("Water.Velocity.Next"));
 
-	CurrentHeightIndex = (CurrentHeightIndex + 1) % 3;
-	CurrentVelocityIndex = (CurrentVelocityIndex + 1) % 2;
+	SceneData->CurrentHeightIndex = (SceneData->CurrentHeightIndex + 1) % 3;
+	SceneData->CurrentVelocityIndex = (SceneData->CurrentVelocityIndex + 1) % 2;
 
 	// 1) Apply interaction impulses to current fields.
 	if (SceneData->CurrentInteractions.Num() > 0)
@@ -240,10 +250,16 @@ void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuild
 	}
 }
 
+void FWaterFieldSceneExtension::FUpdater::PostSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePostUpdateChangeSet& ChangeSet)
+{
+	(void)GraphBuilder;
+	(void)ChangeSet;
+}
+
 // -------------------------- Render -----------------------//
 
 
-BEGIN_SHADER_PARAMETER_STRUCT(FWaterSimulationParameters, WATERSYSTEMRUNTIME_API)
+BEGIN_SHADER_PARAMETER_STRUCT(FWaterSimulationParameters, WATERSYSTEMRENDERER_API)
 	SHADER_PARAMETER(FVector4f, UVScaleOffset)
 	SHADER_PARAMETER(FVector4f, WaterMapSizeAndInv)
 	SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, WaterHeightMapTexture)
@@ -252,7 +268,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FWaterSimulationParameters, WATERSYSTEMRUNTIME_API
 	SHADER_PARAMETER_SAMPLER(SamplerState, WaterVelocityMapTextureSampler)
 END_SHADER_PARAMETER_STRUCT()
 
-DECLARE_SCENE_UB_STRUCT(FWaterSimulationParameters, WaterSimulation, WATERSYSTEMRUNTIME_API)
+DECLARE_SCENE_UB_STRUCT(FWaterSimulationParameters, WaterSimulation, WATERSYSTEMRENDERER_API)
 
 namespace WaterSimulation
 {

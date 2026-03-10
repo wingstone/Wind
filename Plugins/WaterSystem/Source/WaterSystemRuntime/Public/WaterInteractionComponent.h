@@ -70,6 +70,9 @@ protected:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
+	/** Cached previous world position for velocity estimation */
+	FVector LastPosition = FVector::ZeroVector;
+
 	void RegisterWithSubsystem();
 	void UnregisterFromSubsystem();
 	void UpdateInteraction(float DeltaTime);

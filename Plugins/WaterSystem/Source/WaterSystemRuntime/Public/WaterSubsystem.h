@@ -59,6 +59,8 @@ public:
 
 	/** Get scene extension (for rendering thread) */
 	FWaterFieldSceneExtension* GetSceneExtension() const;
+	
+	void ResetState();
 
 private:
 	/** All registered interaction components */

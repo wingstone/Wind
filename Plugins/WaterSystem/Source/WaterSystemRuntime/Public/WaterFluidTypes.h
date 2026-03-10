@@ -103,7 +103,7 @@ struct FWaterInteractionData
 
 	/** Interaction strength paramter: direction, omni, vortex */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
-	FVector3D StrengthParameter = FVector3D(1.0f, 0.0f, 0.0f);
+	FVector StrengthParameter = FVector(1.0f, 0.0f, 0.0f);
 
 	/** Interaction Gaussian falloff， Only used for disk shape */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")

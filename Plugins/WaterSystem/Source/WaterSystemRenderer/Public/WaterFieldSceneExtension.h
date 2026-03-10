@@ -76,6 +76,7 @@ public:
 
 	void SetConfig_RenderThread(const FWaterFluidConfig& NewConfig);
 	void AddInteraction_RenderThread(const FWaterInteractionData& Interaction);
+	void ResetState_RenderThread(FRHICommandListImmediate& RHICmdList, bool bNewEnable);
 
 private:
 
@@ -93,6 +94,7 @@ private:
 	FWaterFluidConfig CurrentConfig;
 	FVector2f WorldGridOrigin;
 
+	bool bEnableSimulation = false;
 	uint32 CurrentHeightIndex = 1;
 	uint32 CurrentVelocityIndex = 0;
 };
