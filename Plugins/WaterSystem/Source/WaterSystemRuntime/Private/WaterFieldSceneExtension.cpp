@@ -61,10 +61,10 @@ void FWaterFieldSceneExtension::SetConfig_RenderThread(const FWaterFluidConfig& 
 	CurrentConfig = NewConfig;
 }
 
-void FWaterFieldSceneExtension::SetScrollOffset_RenderThread(const FVector2f& NewScrollOffset)
+void FWaterFieldSceneExtension::SetScrollOffset_RenderThread(const FIntVector2& NewGridScrollOffset)
 {
 	check(IsInRenderingThread());
-	ScrollOffset = NewScrollOffset;	
+	GridScrollOffset = NewGridScrollOffset;	
 }
 
 void FWaterFieldSceneExtension::SetPendingInteractions_RenderThread(const TArray<FWaterInteractionData>& PendingInteractions)
@@ -84,7 +84,7 @@ void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate
 	CurrentConfig.Density = 1.0f;
 
 	WorldGridOrigin = FVector2f::ZeroVector;
-	ScrollOffset = FVector2f::ZeroVector;
+	GridScrollOffset = FIntVector2::ZeroValue;
 
 	bEnableSimulation = bNewEnable;
 
@@ -124,7 +124,7 @@ FORCEINLINE FPooledRenderTargetDesc CreateWindRenderTargetDesc(FIntPoint RenderT
 // FUpdater — fetch game-thread data for GPU upload
 // ============================================================================
 
-void FWaterFieldSceneExtension::FUpdater::ApplyScroll(FRDGBuilder& GraphBuilder)
+void FWaterFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder)
 {
 	check(IsInRenderingThread());
 
@@ -132,23 +132,17 @@ void FWaterFieldSceneExtension::FUpdater::ApplyScroll(FRDGBuilder& GraphBuilder)
 	const uint32 GridSize = FMath::Max(Config.GridSize, 1);
 	const float CellSize = Config.WorldSize / static_cast<float>(GridSize);
 
-	// Quantize scroll to integer texel boundaries
-	FIntPoint TexelOffset(
-		FMath::RoundToInt32(SceneData->ScrollOffset.X / CellSize),
-		FMath::RoundToInt32(SceneData->ScrollOffset.Y / CellSize));
+	FIntPoint TexelOffset(SceneData->GridScrollOffset.X, SceneData->GridScrollOffset.Y);
 
 	if (TexelOffset.X == 0 && TexelOffset.Y == 0)
 	{
-		SceneData->ScrollOffset = FVector2f::ZeroVector;
+		SceneData->GridScrollOffset = FIntVector2::ZeroValue;
 		return;
 	}
 
 	// Update world grid origin by the quantized amount
 	SceneData->WorldGridOrigin += FVector2f(static_cast<float>(TexelOffset.X), static_cast<float>(TexelOffset.Y)) * CellSize;
-	SceneData->ScrollOffset = FVector2f::ZeroVector;
-
-	UE_LOG(LogWaterFieldSceneExtension, Log, TEXT("Scrolling water grid by (%d, %d) texels, new origin: (%.1f, %.1f)"),
-		TexelOffset.X, TexelOffset.Y, SceneData->WorldGridOrigin.X, SceneData->WorldGridOrigin.Y);
+	SceneData->GridScrollOffset = FIntVector2::ZeroValue;
 
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneData->Scene.GetFeatureLevel());
 	const FIntPoint GridExtent(GridSize, GridSize);
@@ -289,7 +283,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 		Parameters->CellSize = CellSize;
 		Parameters->GridOrigin = GridOrigin;
 		Parameters->DeltaTime = Config.TimeStep;
-		Parameters->SourceTextureSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
+		Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
 		Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightCurrent);
 		Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightNext);
 		Parameters->CurrentVelocityField = GraphBuilder.CreateSRV(VelocityCurrent);
@@ -354,21 +348,19 @@ void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuild
 		}
 
 		// Apply pending scroll before simulation
-		if (!SceneData->ScrollOffset.IsNearlyZero())
+		if (SceneData->GridScrollOffset != FIntVector2::ZeroValue)
 		{
 			if (bTexturesExist)
 			{
-				ApplyScroll(GraphBuilder);
+				ApplyScroll_RenderThread(GraphBuilder);
 			}
 			else
 			{
 				// Textures just created — no data to scroll, just update origin
 				const float CellSize = Config.WorldSize / static_cast<float>(FMath::Max(Config.GridSize, 1));
-				FIntPoint TexelOffset(
-					FMath::RoundToInt32(SceneData->ScrollOffset.X / CellSize),
-					FMath::RoundToInt32(SceneData->ScrollOffset.Y / CellSize));
+				FIntPoint TexelOffset(SceneData->GridScrollOffset.X, SceneData->GridScrollOffset.Y);
 				SceneData->WorldGridOrigin += FVector2f(static_cast<float>(TexelOffset.X), static_cast<float>(TexelOffset.Y)) * CellSize;
-				SceneData->ScrollOffset = FVector2f::ZeroVector;
+				SceneData->GridScrollOffset = FIntVector2::ZeroValue;
 			}
 		}
 

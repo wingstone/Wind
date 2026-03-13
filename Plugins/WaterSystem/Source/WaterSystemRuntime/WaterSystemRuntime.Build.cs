@@ -18,6 +18,7 @@ public class WaterSystemRuntime : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"DeveloperSettings",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

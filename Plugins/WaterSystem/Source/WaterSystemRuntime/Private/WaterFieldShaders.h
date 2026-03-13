@@ -21,7 +21,7 @@ class FSWAdvectionCS : public FGlobalShader
 		SHADER_PARAMETER(float, CellSize)
 		SHADER_PARAMETER(FVector2f, GridOrigin)
 		SHADER_PARAMETER(float, DeltaTime)
-		SHADER_PARAMETER_SAMPLER(SamplerState, SourceTextureSampler)
+		SHADER_PARAMETER_SAMPLER(SamplerState, LinearSampler)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentHeightField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentVelocityField)

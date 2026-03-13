@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "WaterSubsystem.h"
+#include "WaterSystemSettings.h"
 #include "WaterFieldSceneExtension.h"
 #include "WaterInteractionComponent.h"
 #include "Engine/World.h"
@@ -17,6 +18,10 @@ class FWaterFieldSceneExtension;
 void UWaterSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+	const UWaterSystemSettings* Settings = UWaterSystemSettings::Get();
+	FluidConfig = Settings->DefaultFluidConfig;
+	bEnableSimulation = Settings->bEnableSimulation;
 
 	UE_LOG(LogWaterSystem, Log, TEXT("WaterSubsystem initialized - GridSize: %d, WorldSize: %.1f"), 
 		FluidConfig.GridSize, FluidConfig.WorldSize);
@@ -52,28 +57,39 @@ void UWaterSubsystem::Tick(float DeltaTime)
 			}
 		}
 	}
+
+	FIntVector2 ViewLocationInt = FIntVector2(FMath::RoundToInt(ViewLocation.X), FMath::RoundToInt(ViewLocation.Y));
 	
 	// Update scrolling origin if view has moved significantly to maintain precision
-	if (FVector::DistSquared(ViewLocation, LastViewLocation) > FMath::Square(FluidConfig.WorldSize * 0.25f))
+	FIntVector2 ViewDelta = ViewLocationInt - LastViewLocationInt;
+	int64 ViewDistSq = static_cast<int64>(ViewDelta.X) * ViewDelta.X + static_cast<int64>(ViewDelta.Y) * ViewDelta.Y;
+	if (ViewDistSq > FMath::Square(FluidConfig.WorldSize * 0.25f))
 	{
 		if (GetWorld() && GetWorld()->Scene)
 		{
-			FVector Delta = ViewLocation - LastViewLocation;
-			FVector2f ScrollOffset(static_cast<float>(Delta.X), static_cast<float>(Delta.Y));
+			FIntVector2 ScrollOffset = ViewLocationInt - LastViewLocationInt;
+
+			const uint32 GridSize = FMath::Max(FluidConfig.GridSize, 1);
+			const float CellSize = FluidConfig.WorldSize / static_cast<float>(GridSize);
+
+			FIntVector2 GridScrollOffset = FIntVector2(
+				FMath::RoundToInt32(ScrollOffset.X / CellSize),
+				FMath::RoundToInt32(ScrollOffset.Y / CellSize));
+
 			ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
-			[WorldScene = GetWorld()->Scene, ScrollOffset = ScrollOffset](FRHICommandListImmediate& RHICmdList)
+			[WorldScene = GetWorld()->Scene, GridScrollOffset = GridScrollOffset](FRHICommandListImmediate& RHICmdList)
 				{
 					if (WorldScene->GetRenderScene())
 					{
 						if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
 						{
 							UE_LOG(LogWaterSystem, Log, TEXT("Updating fluid config on render thread"));
-							SceneExtension->SetScrollOffset_RenderThread(ScrollOffset);
+							SceneExtension->SetScrollOffset_RenderThread(GridScrollOffset);
 						}
 					}
 				});
 
-			LastViewLocation = ViewLocation;
+			LastViewLocationInt = ViewLocationInt;
 		}
 	}
 	
@@ -88,6 +104,12 @@ TStatId UWaterSubsystem::GetStatId() const
 bool UWaterSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
 {
 	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE || WorldType == EWorldType::Editor || WorldType == EWorldType::GamePreview;
+}
+
+void UWaterSubsystem::SetFluidConfig(const FWaterFluidConfig& NewConfig)
+{
+	FluidConfig = NewConfig;
+	UpdateFluidConfig();
 }
 
 void UWaterSubsystem::ApplyInteraction(const FWaterInteractionData& Interaction)

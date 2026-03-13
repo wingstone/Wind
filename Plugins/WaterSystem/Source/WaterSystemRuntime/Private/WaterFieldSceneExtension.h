@@ -42,7 +42,7 @@ public:
 
 		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder);
 		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder);
-		void ApplyScroll(FRDGBuilder& GraphBuilder);
+		void ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder);
 
 	private:
 		FWaterFieldSceneExtension* SceneData;
@@ -76,7 +76,7 @@ public:
 	virtual ISceneExtensionRenderer* CreateRenderer(FSceneRendererBase& InSceneRenderer, const FEngineShowFlags& EngineShowFlags) override;
 
 	void SetConfig_RenderThread(const FWaterFluidConfig& NewConfig);
-	void SetScrollOffset_RenderThread(const FVector2f& NewScrollOffset);
+	void SetScrollOffset_RenderThread(const FIntVector2& NewGridScrollOffset);
 	void SetPendingInteractions_RenderThread(const TArray<FWaterInteractionData>& PendingInteractions);
 	void ResetState_RenderThread(FRHICommandListImmediate& RHICmdList, bool bNewEnable);
 
@@ -88,6 +88,7 @@ private:
 
 	TRefCountPtr<IPooledRenderTarget> TempHeightFieldRT;
 	TRefCountPtr<IPooledRenderTarget> TempVelocityFieldRT;
+    
 	TRefCountPtr<IPooledRenderTarget> PressureFieldRT;
 	TRefCountPtr<IPooledRenderTarget> DivergenceFieldRT;
 
@@ -95,7 +96,7 @@ private:
 	TArray<FWaterInteractionData> CurrentInteractions;
 	FWaterFluidConfig CurrentConfig;
 	FVector2f WorldGridOrigin;
-	FVector2f ScrollOffset;
+	FIntVector2 GridScrollOffset;
 
 	bool bEnableSimulation = false;
 	uint32 CurrentHeightIndex = 1;

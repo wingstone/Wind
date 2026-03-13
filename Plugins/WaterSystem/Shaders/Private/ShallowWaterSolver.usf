@@ -27,21 +27,21 @@ float CellSize;
 float2 GridOrigin;
 float DeltaTime;
 SamplerState LinearSampler;
-Texture2D<float> CurrentHeightField;
+Texture2D CurrentHeightField;
 RWTexture2D<float> NextHeightField;
-Texture2D<float2> CurrentVelocityField;
+Texture2D CurrentVelocityField;
 RWTexture2D<float2> NextVelocityField;
 
 // Sample height field with boundary conditions
 float SampleHeight(int2 Coord)
 {
-	return CurrentHeightField[Coord];
+	return CurrentHeightField[Coord].x;
 }
 
 // Sample velocity field with boundary conditions
 float2 SampleVelocity(int2 Coord)
 {
-	return CurrentVelocityField[Coord];
+	return CurrentVelocityField[Coord].xy;
 }
 
 // Compute Laplacian (∇²) of velocity field for diffusion term
@@ -114,15 +114,15 @@ void AdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float2 uv = WorldToUV(BackPos);
 	
 	// Sample velocity at back-traced position
-	float newHeight = Texture2DSampleLevel(CurrentHeightField, LinearSampler, uv, 0);
-	float2 newVel = Texture2DSampleLevel(CurrentVelocityField, LinearSampler, uv, 0);
+	float newHeight = Texture2DSampleLevel(CurrentHeightField, LinearSampler, uv, 0).x;
+	float2 newVel = Texture2DSampleLevel(CurrentVelocityField, LinearSampler, uv, 0).xy;
 	
 	// Write output
-	NextHeightField[Index] = newHeight;
-	NextVelocityField[Index] = newVel;
+	NextHeightField[Coord] = newHeight;
+	NextVelocityField[Coord] = newVel;
 }
 
-Texture2D<float> PrevHeightField;
+Texture2D PrevHeightField;
 float Alpha;
 float Beta;
 float Damping;
@@ -143,10 +143,10 @@ void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float left_h = SampleHeight(Coord + int2(-1, 0));
 	float right_h = SampleHeight(Coord + int2(1, 0));
 
-	float prev_h = PrevHeightField[Coord];
+	float prev_h = PrevHeightField[Coord].x;
 
 	float newHeight = Damping* ( h + Beta * (h - prev_h) + Alpha * (up_h + down_h + left_h + right_h - 4.0 * h));
 	
 	// Write output
-	CurrentHeightField[Index] = newHeight;
+	NextHeightField[Coord] = newHeight;
 }

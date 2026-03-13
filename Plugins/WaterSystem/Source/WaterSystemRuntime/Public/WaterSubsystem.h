@@ -39,6 +39,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Fluid")
 	bool bEnableSimulation = true;
 
+	void SetFluidConfig(const FWaterFluidConfig& NewConfig);
 	void ApplyInteraction(const FWaterInteractionData& Interaction);
 	void ResetState();
 
@@ -50,7 +51,7 @@ public:
 private:
 
 	TArray<FWaterInteractionData> PendingInteractions;
-	FVector LastViewLocation = FVector::ZeroVector;
+	FIntVector2 LastViewLocationInt = FIntVector2::ZeroValue;
 
 	/** Update fluid configuration on render thread */
 	void UpdateFluidConfig();

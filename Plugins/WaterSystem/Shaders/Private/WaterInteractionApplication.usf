@@ -22,7 +22,7 @@ float InteractionGaussianFalloff;
 int InteractionShapeType;
 int InteractionEmissionTypeMask;
 float2 InteractionPosition;
-float3 InteractionDirection;
+float2 InteractionDirection;
 RWTexture2D<float> HeightField;
 RWTexture2D<float2> VelocityField;
 
@@ -38,8 +38,6 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	
 	if (Coord.x >= GridSize || Coord.y >= GridSize)
 		return;
-	
-	int Index = GridIndex(Coord);
 
 	float Falloff = 0.0f;
 	if (InteractionShapeType == 1) // Disk
@@ -66,7 +64,7 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	const float HeightIntensity = 1.0f; // This can be exposed as a parameter if needed
-	float Height = InteractionOHeightIntensitymniStrength * Falloff;
+	float Height = HeightIntensity * Falloff;
 	HeightField[Coord] = HeightField[Coord] + Height;
 
 	float2 Velocity = 0.0f;
@@ -85,5 +83,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		TangentialDir = normalize(TangentialDir);
 		Velocity += TangentialDir * InteractionVortexStrength * Falloff;
 	}
-	VelocityField[Index] += Velocity;
+	VelocityField[Coord] += Velocity;
 }
