@@ -42,6 +42,9 @@ struct FWaterFluidConfig
 {
 	GENERATED_BODY()
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
+	bool bEnableSimulation = true;
+
 	/** Solver type - choose between Shallow Water or Navier-Stokes */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
 	EFluidSolverType SolverType = EFluidSolverType::ShallowWater;
@@ -51,27 +54,31 @@ struct FWaterFluidConfig
 	int32 GridSize = 256;
 
 	/** Physical size of simulation area (cm) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "1000"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "100"))
 	float WorldSize = 10000.0f;
 
 	/** Fluid density (g/cm³) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.01"))
 	float Density = 1.0f;
 
+	/** Only used for shallow water solver, controls wave diffusion */ 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float DiffusionAlpha = 0.25f;
+
 	/** Viscosity coefficient */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0"))
-	float Viscosity = 0.01f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float Viscosity = 0.95f;
 
 	/** Wave damping factor */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1"))
-	float Damping = 0.02f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float Damping = 0.95f;
 
 	/** Gravity strength (cm/s²) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0"))
 	float Gravity = 980.0f;
 
 	/** Surface tension coefficient */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float SurfaceTension = 0.05f;
 
 	/** Simulation time step (seconds) */
@@ -80,11 +87,11 @@ struct FWaterFluidConfig
 
 	/** Simulation quality (substeps per frame) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "1", ClampMax = "10"))
-	int32 SimulationSubsteps = 2;
+	int32 SimulationSubsteps = 1;
 	
 	/** Initial water level (cm) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
-	float WaterLevel = 0.0f;
+	float WaterLevel = 5.0f;
 };
 
 /** Player/object interaction data */
@@ -112,6 +119,10 @@ struct FWaterInteractionData
 	/** Interaction Gaussian falloff， Only used for disk shape */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
 	float GaussianFalloff = 0.0f;
+
+	/** Interaction Gaussian falloff， Only used for disk shape */
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	float HeightIntensity = 1.0f;
 
 	/** Interaction shape type */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")

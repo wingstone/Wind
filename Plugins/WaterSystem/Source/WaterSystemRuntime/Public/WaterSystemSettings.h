@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "UObject/UnrealType.h"
 #include "WaterFluidTypes.h"
 #include "WaterSystemSettings.generated.h"
 
@@ -22,11 +23,14 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Fluid Simulation")
 	FWaterFluidConfig DefaultFluidConfig;
 
-	/** Enable 2D fluid simulation by default */
-	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Fluid Simulation")
-	bool bEnableSimulation = true;
-
 	virtual FName GetCategoryName() const override { return TEXT("Game"); }
 
 	static const UWaterSystemSettings* Get() { return GetDefault<UWaterSystemSettings>(); }
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
+	
+	DECLARE_MULTICAST_DELEGATE_TwoParams(FOnUpdateSettings, const UWaterSystemSettings* /*Settings*/, EPropertyChangeType::Type /*ChangeType*/);
+	static FOnUpdateSettings OnSettingsChange;
+#endif
 };

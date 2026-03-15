@@ -24,8 +24,12 @@ public:
 	// --- Interaction Settings ---
 
 	/** Enable automatic water interaction */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction Control")
 	bool bEnableInteraction = true;
+
+	/** Minimum speed required to generate interaction effects */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Interaction Control")
+	float MinSpeedForInteraction = 10.0f;
 
 	/** Interaction shape type */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
@@ -49,7 +53,7 @@ public:
 
 	/** Interaction direction strength paramter */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-	float DisectionalStrength = 1.0f; // Only used for directional emission
+	float DirectionalStrength = 1.0f; // Only used for directional emission
 
 	/** Interaction omni strength paramter */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
@@ -60,9 +64,16 @@ public:
 	float VortexStrength = 0.0f;	// Only used for vortex emission
 	
 	/** Interaction Gaussian falloff */
-	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
-	float GaussianFalloff = 0.0f; // Only used for disk shape
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	float GaussianFalloff = 1.0f;
 
+	/** Interaction height intensity */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	float HeightIntensity = 1.0f;
+
+public:
+	FWaterInteractionData GetCurrentInteractionData() const { return CurrentInteractionData; }
+	bool IsInteractionUseful() const { return bEnableInteraction; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -72,6 +83,8 @@ protected:
 private:
 	/** Cached previous world position for velocity estimation */
 	FVector LastPosition = FVector::ZeroVector;
+	FWaterInteractionData CurrentInteractionData;
+	bool bIsIntersectionUseful;
 
 	void RegisterWithSubsystem();
 	void UnregisterFromSubsystem();

@@ -77,14 +77,15 @@ public:
 
 	void SetConfig_RenderThread(const FWaterFluidConfig& NewConfig);
 	void SetScrollOffset_RenderThread(const FIntVector2& NewGridScrollOffset);
-	void SetPendingInteractions_RenderThread(const TArray<FWaterInteractionData>& PendingInteractions);
-	void ResetState_RenderThread(FRHICommandListImmediate& RHICmdList, bool bNewEnable);
+	void SetInteractionsToApply_RenderThread(const TArray<FWaterInteractionData>& InteractionsToApply);
+	void ResetState_RenderThread(FRHICommandListImmediate& RHICmdList);
 
 private:
 
 	// --- GPU Resources (render thread owned) ---
 	TRefCountPtr<IPooledRenderTarget> HeightFieldRT[3];
 	TRefCountPtr<IPooledRenderTarget> VelocityFieldRT[2];
+	TRefCountPtr<IPooledRenderTarget> NormalFieldRT;
 
 	TRefCountPtr<IPooledRenderTarget> TempHeightFieldRT;
 	TRefCountPtr<IPooledRenderTarget> TempVelocityFieldRT;
@@ -95,10 +96,9 @@ private:
 	// --- Current frame data (render thread) ---
 	TArray<FWaterInteractionData> CurrentInteractions;
 	FWaterFluidConfig CurrentConfig;
-	FVector2f WorldGridOrigin;
+	FVector2f WorldGridCenter;
 	FIntVector2 GridScrollOffset;
 
-	bool bEnableSimulation = false;
 	uint32 CurrentHeightIndex = 1;
 	uint32 CurrentVelocityIndex = 0;
 };

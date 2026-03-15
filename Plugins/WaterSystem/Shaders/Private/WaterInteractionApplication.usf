@@ -19,6 +19,7 @@ float InteractionVortexStrength;
 float InteractionRadius;
 float InteractionRadiusWidth;
 float InteractionGaussianFalloff;
+float InteractionHeightIntensity;
 int InteractionShapeType;
 int InteractionEmissionTypeMask;
 float2 InteractionPosition;
@@ -63,8 +64,7 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		}
 	}
 
-	const float HeightIntensity = 1.0f; // This can be exposed as a parameter if needed
-	float Height = HeightIntensity * Falloff;
+	float Height = InteractionHeightIntensity * Falloff;
 	HeightField[Coord] = HeightField[Coord] + Height;
 
 	float2 Velocity = 0.0f;

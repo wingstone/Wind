@@ -150,3 +150,32 @@ void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Write output
 	NextHeightField[Coord] = newHeight;
 }
+
+Texture2D HeightField;
+RWTexture2D<float2> OutNormalField;
+
+float SampleNormalHeight(int2 Coord)
+{
+	int2 ClampedCoord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
+	return HeightField[ClampedCoord].x;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void HeightToNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+
+	float HeightLeft = SampleNormalHeight(Coord + int2(-1, 0));
+	float HeightRight = SampleNormalHeight(Coord + int2(1, 0));
+	float HeightDown = SampleNormalHeight(Coord + int2(0, -1));
+	float HeightUp = SampleNormalHeight(Coord + int2(0, 1));
+
+	float Dhdx = (HeightRight - HeightLeft) / (2.0 * CellSize);
+	float Dhdy = (HeightUp - HeightDown) / (2.0 * CellSize);
+
+	float3 NormalWS = normalize(float3(-Dhdx, -Dhdy, 1.0));
+	OutNormalField[Coord] = NormalWS.xy;
+}

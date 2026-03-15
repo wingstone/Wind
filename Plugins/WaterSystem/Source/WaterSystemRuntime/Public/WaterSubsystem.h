@@ -4,11 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "UObject/UnrealType.h"
 #include "WaterFluidTypes.h"
 #include "WaterSubsystem.generated.h"
 
 class FWaterFieldSceneExtension;
 class UWaterInteractionComponent;
+class UWaterFluidConfigComponent;
+class UWaterSystemSettings;
 
 /**
  * World subsystem managing 2D water fluid simulation
@@ -20,6 +23,9 @@ class WATERSYSTEMRUNTIME_API UWaterSubsystem : public UTickableWorldSubsystem
 	GENERATED_BODY()
 
 public:
+
+	UWaterSubsystem();
+
 	// USubsystem interface
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
@@ -30,28 +36,29 @@ public:
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
 
 	// --- Fluid Simulation Configuration ---
-
-	/** Fluid simulation configuration */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Fluid")
 	FWaterFluidConfig FluidConfig;
 
-	/** Enable 2D fluid simulation */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water Fluid")
-	bool bEnableSimulation = true;
-
-	void SetFluidConfig(const FWaterFluidConfig& NewConfig);
-	void ApplyInteraction(const FWaterInteractionData& Interaction);
+	void LoadGlobalFluidConfig(const UWaterSystemSettings* Settings, EPropertyChangeType::Type ChangeType);
 	void ResetState();
-
+	
 	void RegisterInteractionComponent(UWaterInteractionComponent* Component);
 	void UnregisterInteractionComponent(UWaterInteractionComponent* Component);
 
+	void RegisterFluidConfigComponent(UWaterFluidConfigComponent* Component);
+	void UnregisterFluidConfigComponent(UWaterFluidConfigComponent* Component);
+	
 	FWaterFieldSceneExtension* GetSceneExtension() const;
-
+	
 private:
+	
+	UPROPERTY()
+	TArray<TObjectPtr<UWaterInteractionComponent>> RegisteredInteractionComponents;
+	UPROPERTY()
+	TArray<TObjectPtr<UWaterFluidConfigComponent>> RegisteredFluidConfigComponents;
 
-	TArray<FWaterInteractionData> PendingInteractions;
 	FIntVector2 LastViewLocationInt = FIntVector2::ZeroValue;
+	
+	void ScrollWorldGrid();
 
 	/** Update fluid configuration on render thread */
 	void UpdateFluidConfig();

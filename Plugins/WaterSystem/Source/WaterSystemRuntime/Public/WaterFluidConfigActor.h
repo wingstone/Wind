@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "WaterFluidTypes.h"
+#include "WaterFluidConfigComponent.h"
 #include "WaterFluidConfigActor.generated.h"
 
 /**
@@ -24,24 +25,6 @@ class WATERSYSTEMRUNTIME_API AWaterFluidConfigActor : public AActor
 public:
 	AWaterFluidConfigActor();
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
-	FWaterFluidConfig FluidConfig;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
-	bool bOverrideEnableSimulation = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation",
-		meta = (EditCondition = "bOverrideEnableSimulation"))
-	bool bEnableSimulation = true;
-
-	virtual void OnConstruction(const FTransform& Transform) override;
-	virtual void Destroyed() override;
-
-#if WITH_EDITOR
-	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
-#endif
-
-private:
-	void ApplyConfigToSubsystem();
-	void RevertConfigToDefaults();
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Simulation", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UWaterFluidConfigComponent> FluidConfigComponent;
 };

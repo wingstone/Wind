@@ -8,6 +8,7 @@ UWaterInteractionComponent::UWaterInteractionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	bAutoActivate = true;
+	bIsIntersectionUseful = false;
 }
 
 void UWaterInteractionComponent::BeginPlay()
@@ -28,7 +29,10 @@ void UWaterInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	if (!bEnableInteraction)
+	{
+		bIsIntersectionUseful = false;
 		return;
+	}
 
 	UpdateInteraction(DeltaTime);
 
@@ -51,12 +55,9 @@ void UWaterInteractionComponent::UnregisterFromSubsystem()
 	}
 }
 
+UE_DISABLE_OPTIMIZATION_SHIP
 void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 {
-	UWaterSubsystem* WaterSys = GetWaterSubsystem();
-	if (!WaterSys)
-		return;
-
 	FVector CurrentPosition = GetComponentLocation();
 	FVector CurrentVelocity = (CurrentPosition - LastPosition) / DeltaTime;
 	bool bIsSubmerged = IsSubmerged(CurrentPosition);
@@ -67,20 +68,27 @@ void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 		FVector2D Velocity2D(CurrentVelocity.X, CurrentVelocity.Y);
 		float Speed2D = Velocity2D.Size();
 
-		if (Speed2D > 10.0f) // Minimum speed to generate waves
+		if (Speed2D > MinSpeedForInteraction) // Minimum speed to generate waves
 		{
-			FWaterInteractionData Interaction;
+			bIsIntersectionUseful = true;
 
-			Interaction.Position = FVector2D(CurrentPosition.X, CurrentPosition.Y);
-			Interaction.ForceDirection = Velocity2D.GetSafeNormal();
-			Interaction.RadiusParameter = FVector2D(Radius, Width);
-			Interaction.StrengthParameter = FVector(DisectionalStrength, OmniStrength, VortexStrength);
-			Interaction.GaussianFalloff = GaussianFalloff;
-			Interaction.ShapeType = ShapeType;
-			Interaction.EmissionType = EmissionType;
-			
-			WaterSys->ApplyInteraction(Interaction);
+			CurrentInteractionData.Position = FVector2D(CurrentPosition.X, CurrentPosition.Y);
+			CurrentInteractionData.ForceDirection = Velocity2D.GetSafeNormal();
+			CurrentInteractionData.RadiusParameter = FVector2D(Radius, Width);
+			CurrentInteractionData.StrengthParameter = FVector(DirectionalStrength, OmniStrength, VortexStrength);
+			CurrentInteractionData.HeightIntensity = HeightIntensity;
+			CurrentInteractionData.GaussianFalloff = GaussianFalloff;
+			CurrentInteractionData.ShapeType = ShapeType;
+			CurrentInteractionData.EmissionType = EmissionType;
 		}
+		else
+		{
+			bIsIntersectionUseful = false;
+		}
+	}
+	else
+	{
+		bIsIntersectionUseful = false;
 	}
 }
 
@@ -91,9 +99,10 @@ bool UWaterInteractionComponent::IsSubmerged(FVector CurrentPosition) const
 		const FWaterFluidConfig& Config = WaterSys->FluidConfig;
 		return CurrentPosition.Z < Config.WaterLevel;
 	}
-
+	
 	return CurrentPosition.Z < 0;
 }
+UE_ENABLE_OPTIMIZATION_SHIP
 
 UWaterSubsystem* UWaterInteractionComponent::GetWaterSubsystem() const
 {

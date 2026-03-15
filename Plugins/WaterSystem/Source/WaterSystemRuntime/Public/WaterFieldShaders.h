@@ -73,6 +73,33 @@ class FSWDiffusionCS : public FGlobalShader
 };
 
 /**
+ * SW Step 4: Height to normal conversion
+ */
+class FWaterHeightToNormalCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FWaterHeightToNormalCS);
+	SHADER_USE_PARAMETER_STRUCT(FWaterHeightToNormalCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(uint32, GridSize)
+		SHADER_PARAMETER(float, CellSize)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, HeightField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutNormalField)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};
+
+/**
  * Scroll height field texture with integer texel offset
  */
 class FWaterScrollHeightCS : public FGlobalShader
@@ -146,6 +173,7 @@ class FWaterInteractionApplicationCS : public FGlobalShader
 		SHADER_PARAMETER(float, InteractionRadius)
 		SHADER_PARAMETER(float, InteractionRadiusWidth)
 		SHADER_PARAMETER(float, InteractionGaussianFalloff)
+		SHADER_PARAMETER(float, InteractionHeightIntensity)
 		SHADER_PARAMETER(uint32, InteractionShapeType)
 		SHADER_PARAMETER(uint32, InteractionEmissionTypeMask)
 		SHADER_PARAMETER(FVector2f, InteractionPosition)

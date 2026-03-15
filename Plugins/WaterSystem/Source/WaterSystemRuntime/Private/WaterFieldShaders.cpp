@@ -10,6 +10,7 @@ IMPLEMENT_GLOBAL_SHADER(FWaterScrollVelocityCS, "/Plugin/WaterSystem/Private/Wat
 // Shallow Water Equations Solver
 IMPLEMENT_GLOBAL_SHADER(FSWAdvectionCS, "/Plugin/WaterSystem/Private/ShallowWaterSolver.usf", "AdvectionCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FSWDiffusionCS, "/Plugin/WaterSystem/Private/ShallowWaterSolver.usf", "DiffusionCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FWaterHeightToNormalCS, "/Plugin/WaterSystem/Private/ShallowWaterSolver.usf", "HeightToNormalCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FWaterInteractionApplicationCS, "/Plugin/WaterSystem/Private/WaterInteractionApplication.usf", "MainCS", SF_Compute);
 
 // Navier-Stokes Solver (5 steps)

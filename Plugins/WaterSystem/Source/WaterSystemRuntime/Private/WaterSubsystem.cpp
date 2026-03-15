@@ -4,6 +4,7 @@
 #include "WaterSystemSettings.h"
 #include "WaterFieldSceneExtension.h"
 #include "WaterInteractionComponent.h"
+#include "WaterFluidConfigComponent.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "SceneInterface.h"
@@ -15,13 +16,21 @@ DEFINE_LOG_CATEGORY_STATIC(LogWaterSystem, Log, All);
 // Forward declare to avoid circular dependency
 class FWaterFieldSceneExtension;
 
+UWaterSubsystem::UWaterSubsystem()
+{
+#if WITH_EDITOR
+	UWaterSystemSettings::OnSettingsChange.AddUObject(this, &UWaterSubsystem::LoadGlobalFluidConfig);
+#endif
+}
+
 void UWaterSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
 	const UWaterSystemSettings* Settings = UWaterSystemSettings::Get();
 	FluidConfig = Settings->DefaultFluidConfig;
-	bEnableSimulation = Settings->bEnableSimulation;
+
+	ResetState();
 
 	UE_LOG(LogWaterSystem, Log, TEXT("WaterSubsystem initialized - GridSize: %d, WorldSize: %.1f"), 
 		FluidConfig.GridSize, FluidConfig.WorldSize);
@@ -36,9 +45,45 @@ void UWaterSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	if (!bEnableSimulation)
+	if (!FluidConfig.bEnableSimulation)
 		return;
 
+	ScrollWorldGrid();
+	UpdateInteractions();
+}
+
+TStatId UWaterSubsystem::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UWaterSubsystem, STATGROUP_Tickables);
+}
+
+bool UWaterSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
+{
+	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE || WorldType == EWorldType::Editor || WorldType == EWorldType::GamePreview;
+}
+
+void UWaterSubsystem::RegisterInteractionComponent(UWaterInteractionComponent* Component)
+{
+	RegisteredInteractionComponents.AddUnique(Component);
+}
+
+void UWaterSubsystem::UnregisterInteractionComponent(UWaterInteractionComponent* Component)
+{
+	RegisteredInteractionComponents.Remove(Component);
+}
+
+void UWaterSubsystem::RegisterFluidConfigComponent(UWaterFluidConfigComponent* Component)
+{
+	RegisteredFluidConfigComponents.AddUnique(Component);
+}
+
+void UWaterSubsystem::UnregisterFluidConfigComponent(UWaterFluidConfigComponent* Component)
+{
+	RegisteredFluidConfigComponents.Remove(Component);
+}
+
+void UWaterSubsystem::ScrollWorldGrid()
+{
 	// Get view location
 	FVector ViewLocation = FVector::ZeroVector;
 	if (UWorld* World = GetWorld())
@@ -75,15 +120,16 @@ void UWaterSubsystem::Tick(float DeltaTime)
 			FIntVector2 GridScrollOffset = FIntVector2(
 				FMath::RoundToInt32(ScrollOffset.X / CellSize),
 				FMath::RoundToInt32(ScrollOffset.Y / CellSize));
+			GridScrollOffset = FIntVector2::ZeroValue; // Disable scrolling for now to simplify development
 
-			ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
+			ENQUEUE_RENDER_COMMAND(ScrollOffset)(
 			[WorldScene = GetWorld()->Scene, GridScrollOffset = GridScrollOffset](FRHICommandListImmediate& RHICmdList)
 				{
 					if (WorldScene->GetRenderScene())
 					{
 						if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
 						{
-							UE_LOG(LogWaterSystem, Log, TEXT("Updating fluid config on render thread"));
+							UE_LOG(LogWaterSystem, Log, TEXT("Scroll offset on render thread"));
 							SceneExtension->SetScrollOffset_RenderThread(GridScrollOffset);
 						}
 					}
@@ -92,47 +138,20 @@ void UWaterSubsystem::Tick(float DeltaTime)
 			LastViewLocationInt = ViewLocationInt;
 		}
 	}
-	
-	UpdateInteractions();
-}
-
-TStatId UWaterSubsystem::GetStatId() const
-{
-	RETURN_QUICK_DECLARE_CYCLE_STAT(UWaterSubsystem, STATGROUP_Tickables);
-}
-
-bool UWaterSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
-{
-	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE || WorldType == EWorldType::Editor || WorldType == EWorldType::GamePreview;
-}
-
-void UWaterSubsystem::SetFluidConfig(const FWaterFluidConfig& NewConfig)
-{
-	FluidConfig = NewConfig;
-	UpdateFluidConfig();
-}
-
-void UWaterSubsystem::ApplyInteraction(const FWaterInteractionData& Interaction)
-{
-	PendingInteractions.Add(Interaction);
-}
-
-void UWaterSubsystem::RegisterInteractionComponent(UWaterInteractionComponent* Component)
-{
-	// No-op: interactions are applied per-frame via ApplyInteraction
-}
-
-void UWaterSubsystem::UnregisterInteractionComponent(UWaterInteractionComponent* Component)
-{
-	// No-op: interactions are applied per-frame via ApplyInteraction
 }
 
 void UWaterSubsystem::UpdateFluidConfig()
 {
 	if (GetWorld() && GetWorld()->Scene)
 	{
+		FWaterFluidConfig ApplyFluidConfig = FluidConfig;
+		if (RegisteredFluidConfigComponents.Num() > 0)
+		{
+			// For now just take the first registered config component, we can blend them later if needed
+			ApplyFluidConfig = RegisteredFluidConfigComponents[0]->GetFluidConfig();
+		}
 		ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
-		[WorldScene = GetWorld()->Scene, FluidConfig = FluidConfig](FRHICommandListImmediate& RHICmdList)
+		[WorldScene = GetWorld()->Scene, FluidConfig = ApplyFluidConfig](FRHICommandListImmediate& RHICmdList)
 			{
 				if (WorldScene->GetRenderScene())
 				{
@@ -146,18 +165,32 @@ void UWaterSubsystem::UpdateFluidConfig()
 	}
 }
 
+void UWaterSubsystem::LoadGlobalFluidConfig(const UWaterSystemSettings* Settings, EPropertyChangeType::Type ChangeType)
+{
+	FluidConfig = Settings->DefaultFluidConfig;
+	ResetState();
+}
+
 void UWaterSubsystem::UpdateInteractions()
 {
-	if (GetWorld() && GetWorld()->Scene)
+	if (GetWorld() && GetWorld()->Scene && RegisteredInteractionComponents.Num() > 0)
 	{
+		TArray<FWaterInteractionData> InteractionsToApply;
+		for (UWaterInteractionComponent* Component : RegisteredInteractionComponents)
+		{
+			if (Component && Component->IsInteractionUseful())
+			{
+				InteractionsToApply.Add(Component->GetCurrentInteractionData());
+			}
+		}
 		ENQUEUE_RENDER_COMMAND(UpdateInteractions)(
-		[WorldScene = GetWorld()->Scene, PendingInteractions = PendingInteractions](FRHICommandListImmediate& RHICmdList) 
+		[WorldScene = GetWorld()->Scene, InteractionsToApply = InteractionsToApply](FRHICommandListImmediate& RHICmdList) 
 			{
 				if (WorldScene->GetRenderScene())
 				{
 					if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
 					{
-						SceneExtension->SetPendingInteractions_RenderThread(PendingInteractions);
+						SceneExtension->SetInteractionsToApply_RenderThread(InteractionsToApply);
 					}
 				}
 			});
@@ -170,16 +203,18 @@ void UWaterSubsystem::ResetState()
 	if (GetWorld() && GetWorld()->Scene)
 	{
 		ENQUEUE_RENDER_COMMAND(UWaterSubsystem_ResetState)(
-		[WorldScene = GetWorld()->Scene, bEnableSimulation = bEnableSimulation](FRHICommandListImmediate& RHICmdList)
+		[WorldScene = GetWorld()->Scene](FRHICommandListImmediate& RHICmdList)
 			{
 				if (WorldScene->GetRenderScene())
 				{
 					if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
 					{
 						UE_LOG(LogWaterSystem, Log, TEXT("Resetting state on render thread"));
-						SceneExtension->ResetState_RenderThread(RHICmdList, bEnableSimulation);
+						SceneExtension->ResetState_RenderThread(RHICmdList);
 					}
 				}
 			});
+
+		UpdateFluidConfig();
 	}
 }
