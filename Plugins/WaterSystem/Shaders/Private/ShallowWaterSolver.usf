@@ -91,7 +91,8 @@ float2 GridToWorld(int2 Coord)
 
 float2 WorldToUV(float2 WorldPos)
 {
-	return (WorldPos - GridOrigin) / (CellSize * GridSize);
+	float2 GridSizeInv = 1.0f / GridSize;
+	return (WorldPos - GridOrigin) / (CellSize * GridSize) + GridSizeInv * 0.5;
 }
 
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]

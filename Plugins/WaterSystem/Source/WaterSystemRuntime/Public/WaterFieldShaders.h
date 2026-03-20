@@ -172,7 +172,7 @@ class FWaterInteractionApplicationCS : public FGlobalShader
 		SHADER_PARAMETER(float, InteractionVortexStrength)
 		SHADER_PARAMETER(float, InteractionRadius)
 		SHADER_PARAMETER(float, InteractionRadiusWidth)
-		SHADER_PARAMETER(float, InteractionGaussianFalloff)
+		SHADER_PARAMETER(float, InteractionPowerFalloff)
 		SHADER_PARAMETER(float, InteractionHeightIntensity)
 		SHADER_PARAMETER(uint32, InteractionShapeType)
 		SHADER_PARAMETER(uint32, InteractionEmissionTypeMask)

@@ -73,16 +73,8 @@ struct FWaterFluidConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float Damping = 0.95f;
 
-	/** Gravity strength (cm/s²) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0"))
-	float Gravity = 980.0f;
-
-	/** Surface tension coefficient */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
-	float SurfaceTension = 0.05f;
-
 	/** Simulation time step (seconds) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.001", ClampMax = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.0", ClampMax = "0.1"))
 	float TimeStep = 0.016f;
 
 	/** Simulation quality (substeps per frame) */
@@ -116,9 +108,9 @@ struct FWaterInteractionData
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
 	FVector StrengthParameter = FVector(1.0f, 0.0f, 0.0f);
 
-	/** Interaction Gaussian falloff， Only used for disk shape */
+	/** Interaction Power falloff， Only used for disk shape */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
-	float GaussianFalloff = 0.0f;
+	float PowerFalloff = 0.0f;
 
 	/** Interaction Gaussian falloff， Only used for disk shape */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")

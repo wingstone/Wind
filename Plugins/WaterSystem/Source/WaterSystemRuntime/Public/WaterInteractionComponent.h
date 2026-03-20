@@ -39,10 +39,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
 	ESourceEmissionType EmissionType = ESourceEmissionType::Directional;
 
-	/** Interaction force/velocity */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-	FVector2D ForceDirection = FVector2D::ZeroVector;
-
 	/** Interaction radius */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
 	float Radius = 100.0f;
@@ -63,9 +59,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
 	float VortexStrength = 0.0f;	// Only used for vortex emission
 	
-	/** Interaction Gaussian falloff */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
-	float GaussianFalloff = 1.0f;
+	/** Interaction Power falloff */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (UIMin = "0.001", UIMax = "10", ClampMax = "10", ClampMin = "0.001"))
+	float PowerFalloff = 1.0f;
 
 	/** Interaction height intensity */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")

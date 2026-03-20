@@ -18,7 +18,7 @@ float InteractionOmniStrength;
 float InteractionVortexStrength;
 float InteractionRadius;
 float InteractionRadiusWidth;
-float InteractionGaussianFalloff;
+float InteractionPowerFalloff;
 float InteractionHeightIntensity;
 int InteractionShapeType;
 int InteractionEmissionTypeMask;
@@ -47,7 +47,7 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		float Distance = length(WorldPos - InteractionPosition);
 		if (Distance < InteractionRadius)
 		{
-			Falloff = exp(-Distance * Distance / (InteractionRadius * InteractionRadius * InteractionGaussianFalloff));
+			Falloff = pow(Distance / InteractionRadius, InteractionPowerFalloff);
 		}
 	}
 	else if (InteractionShapeType == 2) // Ring
@@ -60,7 +60,7 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			float OutDistance = DistanceToCenter - InteractionRadius;
 			float InDistance = InteractionRadius - DistanceToCenter;
 			float Distance = max(OutDistance, InDistance);
-			Falloff = exp(-Distance * Distance / (InteractionRadius * InteractionRadius * InteractionGaussianFalloff));
+			Falloff = pow(Distance / InteractionRadius, InteractionPowerFalloff);
 		}
 	}
 
@@ -74,7 +74,9 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 	if (InteractionEmissionTypeMask & 0x2) // Omni
 	{
-		Velocity += InteractionDirection * InteractionOmniStrength * Falloff;
+		float2 OmniDirection = GridToWorld(Coord) - InteractionPosition;
+		OmniDirection = normalize(OmniDirection);
+		Velocity += OmniDirection * InteractionOmniStrength * Falloff;
 	}
 	if (InteractionEmissionTypeMask & 0x4) // Vortex
 	{
