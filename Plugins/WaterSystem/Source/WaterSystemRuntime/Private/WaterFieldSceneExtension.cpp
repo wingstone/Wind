@@ -111,6 +111,7 @@ void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate
 	TempVelocityFieldRT.SafeRelease();
 	NormalFieldRT.SafeRelease();
 	PressureFieldRT.SafeRelease();
+	TempPressureFieldRT.SafeRelease();
 	DivergenceFieldRT.SafeRelease();
 }
 
@@ -302,6 +303,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 			Parameters->CellSize = CellSize;
 			Parameters->GridOrigin = GridOrigin;
 			Parameters->DeltaTime = Config.TimeStep;
+			Parameters->AdvectionDamping = Config.AdvectionDamping;
 			Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
 			Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
 			Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightRefs[(SceneData->CurrentHeightIndex + 1) % 3]);
@@ -332,7 +334,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 			Parameters->CellSize = CellSize;
 			Parameters->GridOrigin = GridOrigin;
 			Parameters->Alpha = Config.DiffusionAlpha;
-			Parameters->Beta = Config.Viscosity;
+			Parameters->Beta = Config.DiffusionBeta;
 			Parameters->Damping = FMath::Clamp(Config.Damping, 0.0f, 1.0f);
 			Parameters->PrevHeightField = GraphBuilder.CreateSRV(HeightRefs[(SceneData->CurrentHeightIndex + 2) % 3]);
 			Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
@@ -374,9 +376,192 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 
 void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder)
 {
-	// TODO: Implement Navier-Stokes solver dispatch
-	// Requires shader conversion to texture-based operations
-	UE_LOG(LogWaterFieldSceneExtension, VeryVerbose, TEXT("Navier-Stokes solver (stub)"));
+	check(IsInRenderingThread());
+
+	if (!SceneData->VelocityFieldRT[0] || !SceneData->VelocityFieldRT[1] ||
+		!SceneData->TempVelocityFieldRT || !SceneData->PressureFieldRT ||
+		!SceneData->TempPressureFieldRT || !SceneData->DivergenceFieldRT)
+	{
+		return;
+	}
+
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneData->Scene.GetFeatureLevel());
+
+	const FWaterFluidConfig& Config = SceneData->CurrentConfig;
+	const uint32 GridSize = FMath::Max(Config.GridSize, 1);
+	const float CellSize = Config.WorldSize / static_cast<float>(GridSize);
+	const FVector2f GridOrigin(SceneData->WorldGridCenter - FVector2f(0.5f * Config.WorldSize));
+	const FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(FIntPoint(GridSize, GridSize), FIntPoint(16, 16));
+
+	const uint32 CurVelIdx = SceneData->CurrentVelocityIndex;
+	const uint32 NextVelIdx = (CurVelIdx + 1) % 2;
+
+	FRDGTextureRef VelocityRefs[2];
+	VelocityRefs[0] = GraphBuilder.RegisterExternalTexture(SceneData->VelocityFieldRT[0]);
+	VelocityRefs[1] = GraphBuilder.RegisterExternalTexture(SceneData->VelocityFieldRT[1]);
+	FRDGTextureRef TempVelocityRef = GraphBuilder.RegisterExternalTexture(SceneData->TempVelocityFieldRT);
+	FRDGTextureRef PressureRef = GraphBuilder.RegisterExternalTexture(SceneData->PressureFieldRT);
+	FRDGTextureRef TempPressureRef = GraphBuilder.RegisterExternalTexture(SceneData->TempPressureFieldRT);
+	FRDGTextureRef DivergenceRef = GraphBuilder.RegisterExternalTexture(SceneData->DivergenceFieldRT);
+
+	// 0) Apply interaction impulses
+	if (SceneData->CurrentInteractions.Num() > 0 && SceneData->HeightFieldRT[0])
+	{
+		FRDGTextureRef HeightRef = GraphBuilder.RegisterExternalTexture(SceneData->HeightFieldRT[0]);
+		const TShaderMapRef<FWaterInteractionApplicationCS> InteractionCS(GlobalShaderMap);
+		for (const FWaterInteractionData& Interaction : SceneData->CurrentInteractions)
+		{
+			FWaterInteractionApplicationCS::FParameters* Parameters = GraphBuilder.AllocParameters<FWaterInteractionApplicationCS::FParameters>();
+			Parameters->GridSize = GridSize;
+			Parameters->CellSize = CellSize;
+			Parameters->GridOrigin = GridOrigin;
+			Parameters->InteractionDirectionalStrength = Interaction.StrengthParameter.X;
+			Parameters->InteractionOmniStrength = Interaction.StrengthParameter.Y;
+			Parameters->InteractionVortexStrength = Interaction.StrengthParameter.Z;
+			Parameters->InteractionRadius = Interaction.RadiusParameter.X;
+			Parameters->InteractionRadiusWidth = Interaction.RadiusParameter.Y;
+			Parameters->InteractionPowerFalloff = FMath::Max(Interaction.PowerFalloff, 1e-4f);
+			Parameters->InteractionHeightIntensity = Interaction.HeightIntensity;
+			Parameters->InteractionShapeType = (1u << static_cast<uint32>(Interaction.ShapeType));
+			Parameters->InteractionEmissionTypeMask = (1u << static_cast<uint32>(Interaction.EmissionType));
+			Parameters->InteractionPosition = FVector2f(Interaction.Position);
+			Parameters->InteractionDirection = FVector2f(Interaction.ForceDirection);
+			Parameters->HeightField = GraphBuilder.CreateUAV(HeightRef);
+			Parameters->VelocityField = GraphBuilder.CreateUAV(VelocityRefs[CurVelIdx]);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("Water.NS.Interaction"),
+				ERDGPassFlags::Compute,
+				InteractionCS,
+				Parameters,
+				GroupCount);
+		}
+	}
+	SceneData->CurrentInteractions.Reset();
+
+	// 1) Advection: VelocityRT[cur] → TempVelocityRT
+	{
+		const TShaderMapRef<FNSAdvectionCS> AdvectionCS(GlobalShaderMap);
+		FNSAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSAdvectionCS::FParameters>();
+		Parameters->GridSize = GridSize;
+		Parameters->DeltaTime = Config.TimeStep;
+		Parameters->CellSize = CellSize;
+		Parameters->Damping = FMath::Clamp(Config.Damping, 0.0f, 1.0f);
+		Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+		Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[CurVelIdx]);
+		Parameters->TempVelocityField = GraphBuilder.CreateUAV(TempVelocityRef);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Water.NS.Advection"),
+			ERDGPassFlags::Compute,
+			AdvectionCS,
+			Parameters,
+			GroupCount);
+	}
+
+	// 2) Diffusion: TempVelocityRT → VelocityRT[next]
+	{
+		const TShaderMapRef<FNSDiffusionCS> DiffusionCS(GlobalShaderMap);
+		FNSDiffusionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSDiffusionCS::FParameters>();
+		Parameters->GridSize = GridSize;
+		Parameters->DeltaTime = Config.TimeStep;
+		Parameters->CellSize = CellSize;
+		Parameters->Viscosity = Config.Viscosity;
+		Parameters->VelocityField = GraphBuilder.CreateSRV(TempVelocityRef);
+		Parameters->OutVelocityField = GraphBuilder.CreateUAV(VelocityRefs[NextVelIdx]);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Water.NS.Diffusion"),
+			ERDGPassFlags::Compute,
+			DiffusionCS,
+			Parameters,
+			GroupCount);
+	}
+
+	// 3) Compute Divergence: VelocityRT[next] → DivergenceRT
+	{
+		const TShaderMapRef<FNSComputeDivergenceCS> ComputeDivergenceCS(GlobalShaderMap);
+		FNSComputeDivergenceCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSComputeDivergenceCS::FParameters>();
+		Parameters->GridSize = GridSize;
+		Parameters->CellSize = CellSize;
+		Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[NextVelIdx]);
+		Parameters->OutDivergenceField = GraphBuilder.CreateUAV(DivergenceRef);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Water.NS.ComputeDivergence"),
+			ERDGPassFlags::Compute,
+			ComputeDivergenceCS,
+			Parameters,
+			GroupCount);
+	}
+
+	// 4) Pressure Solve: Jacobi iterations (ping-pong PressureRT ↔ TempPressureRT)
+	{
+		static constexpr int32 NumJacobiIterations = 20;
+		const TShaderMapRef<FNSPressureSolveCS> PressureSolveCS(GlobalShaderMap);
+
+		FRDGTextureRef PressurePing = PressureRef;
+		FRDGTextureRef PressurePong = TempPressureRef;
+
+		for (int32 i = 0; i < NumJacobiIterations; i++)
+		{
+			FNSPressureSolveCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSPressureSolveCS::FParameters>();
+			Parameters->GridSize = GridSize;
+			Parameters->DeltaTime = Config.TimeStep;
+			Parameters->CellSize = CellSize;
+			Parameters->Density = Config.Density;
+			Parameters->PressureField = GraphBuilder.CreateSRV(PressurePing);
+			Parameters->DivergenceField = GraphBuilder.CreateSRV(DivergenceRef);
+			Parameters->OutPressureField = GraphBuilder.CreateUAV(PressurePong);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("Water.NS.PressureSolve_%d", i),
+				ERDGPassFlags::Compute,
+				PressureSolveCS,
+				Parameters,
+				GroupCount);
+
+			Swap(PressurePing, PressurePong);
+		}
+
+		// After even iterations, PressurePing == PressureRef (final result in PressureFieldRT)
+		// After odd iterations, swap pooled RTs so PressureFieldRT has final result
+		if (NumJacobiIterations % 2 != 0)
+		{
+			Swap(SceneData->PressureFieldRT, SceneData->TempPressureFieldRT);
+		}
+	}
+
+	// Re-register pressure after potential swap
+	PressureRef = GraphBuilder.RegisterExternalTexture(SceneData->PressureFieldRT);
+
+	// 5) Projection: VelocityRT[next] + PressureRT → VelocityRT[cur]
+	{
+		const TShaderMapRef<FNSProjectionCS> ProjectionCS(GlobalShaderMap);
+		FNSProjectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSProjectionCS::FParameters>();
+		Parameters->GridSize = GridSize;
+		Parameters->DeltaTime = Config.TimeStep;
+		Parameters->CellSize = CellSize;
+		Parameters->Density = Config.Density;
+		Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[NextVelIdx]);
+		Parameters->PressureField = GraphBuilder.CreateSRV(PressureRef);
+		Parameters->OutVelocityField = GraphBuilder.CreateUAV(VelocityRefs[CurVelIdx]);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Water.NS.Projection"),
+			ERDGPassFlags::Compute,
+			ProjectionCS,
+			Parameters,
+			GroupCount);
+	}
+
+	// Final divergence-free velocity is in VelocityFieldRT[CurVelIdx] — CurrentVelocityIndex unchanged
 }
 
 void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms)
@@ -423,6 +608,57 @@ void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuild
 	}
 	else
 	{
+		// Navier-Stokes solver resources
+		SceneData->CurrentHeightIndex = 0;
+
+		if (!SceneData->HeightFieldRT[0])
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->HeightFieldRT[0], TEXT("HeightFieldRT"));
+			FRDGTextureRef HeightTexture = GraphBuilder.RegisterExternalTexture(SceneData->HeightFieldRT[0], TEXT("Water.Height.InitClear"));
+			AddClearRenderTargetPass(GraphBuilder, HeightTexture, FLinearColor::Black);
+		}
+
+		for (uint32 i = 0; i < 2; i++)
+		{
+			if (!SceneData->VelocityFieldRT[i])
+			{
+				GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->VelocityFieldRT[i], TEXT("VelocityFieldRT"));
+				FRDGTextureRef VelocityTexture = GraphBuilder.RegisterExternalTexture(SceneData->VelocityFieldRT[i], TEXT("Water.Velocity.InitClear"));
+				AddClearRenderTargetPass(GraphBuilder, VelocityTexture, FLinearColor::Black);
+			}
+		}
+
+		if (!SceneData->TempVelocityFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->TempVelocityFieldRT, TEXT("TempVelocityFieldRT"));
+		}
+
+		if (!SceneData->PressureFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->PressureFieldRT, TEXT("PressureFieldRT"));
+			FRDGTextureRef PressureTexture = GraphBuilder.RegisterExternalTexture(SceneData->PressureFieldRT, TEXT("Water.Pressure.InitClear"));
+			AddClearRenderTargetPass(GraphBuilder, PressureTexture, FLinearColor::Black);
+		}
+
+		if (!SceneData->TempPressureFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->TempPressureFieldRT, TEXT("TempPressureFieldRT"));
+			FRDGTextureRef TempPressureTexture = GraphBuilder.RegisterExternalTexture(SceneData->TempPressureFieldRT, TEXT("Water.TempPressure.InitClear"));
+			AddClearRenderTargetPass(GraphBuilder, TempPressureTexture, FLinearColor::Black);
+		}
+
+		if (!SceneData->DivergenceFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->DivergenceFieldRT, TEXT("DivergenceFieldRT"));
+		}
+
+		if (!SceneData->NormalFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->NormalFieldRT, TEXT("NormalFieldRT"));
+			FRDGTextureRef NormalTexture = GraphBuilder.RegisterExternalTexture(SceneData->NormalFieldRT, TEXT("Water.Normal.InitClear"));
+			AddClearRenderTargetPass(GraphBuilder, NormalTexture, FLinearColor::Black);
+		}
+
 		ExecuteNavierStokesSolver_RenderThread(GraphBuilder);
 	}
 }

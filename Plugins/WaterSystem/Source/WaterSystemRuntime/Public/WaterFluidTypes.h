@@ -57,22 +57,6 @@ struct FWaterFluidConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "100"))
 	float WorldSize = 10000.0f;
 
-	/** Fluid density (g/cm³) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.01"))
-	float Density = 1.0f;
-
-	/** Only used for shallow water solver, controls wave diffusion */ 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
-	float DiffusionAlpha = 0.25f;
-
-	/** Viscosity coefficient */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
-	float Viscosity = 0.95f;
-
-	/** Wave damping factor */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
-	float Damping = 0.95f;
-
 	/** Simulation time step (seconds) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.0", ClampMax = "0.1"))
 	float TimeStep = 0.016f;
@@ -84,6 +68,30 @@ struct FWaterFluidConfig
 	/** Initial water level (cm) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
 	float WaterLevel = 5.0f;
+
+	/** Fluid density (g/cm³) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navier Stokes Parameters", meta = (ClampMin = "0.01"))
+	float Density = 1.0f;
+	
+	/** Viscosity coefficient */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navier Stokes Parameters", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float Viscosity = 0.95f;
+	
+	/** Wave damping factor */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shallow Water Parameters", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float Damping = 0.95f;
+
+	/** Wave damping factor */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shallow Water Parameters", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float AdvectionDamping = 0.95f;
+	
+	/** Only used for shallow water solver, controls wave diffusion */ 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shallow Water Parameters", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float DiffusionAlpha = 0.25f;
+
+	/** Only used for shallow water solver, controls wave diffusion */ 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shallow Water Parameters", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float DiffusionBeta = 0.95f;
 };
 
 /** Player/object interaction data */

@@ -91,6 +91,7 @@ private:
 	TRefCountPtr<IPooledRenderTarget> TempVelocityFieldRT;
     
 	TRefCountPtr<IPooledRenderTarget> PressureFieldRT;
+	TRefCountPtr<IPooledRenderTarget> TempPressureFieldRT;
 	TRefCountPtr<IPooledRenderTarget> DivergenceFieldRT;
 
 	// --- Current frame data (render thread) ---

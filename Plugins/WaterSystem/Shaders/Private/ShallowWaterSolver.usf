@@ -26,6 +26,7 @@ uint GridSize;
 float CellSize;
 float2 GridOrigin;
 float DeltaTime;
+float AdvectionDamping;
 SamplerState LinearSampler;
 Texture2D CurrentHeightField;
 RWTexture2D<float> NextHeightField;
@@ -42,46 +43,6 @@ float SampleHeight(int2 Coord)
 float2 SampleVelocity(int2 Coord)
 {
 	return CurrentVelocityField[Coord].xy;
-}
-
-// Compute Laplacian (∇²) of velocity field for diffusion term
-float2 ComputeVelocityLaplacian(int2 Coord)
-{
-	float2 Center = SampleVelocity(Coord);
-	float2 Left   = SampleVelocity(Coord + int2(-1, 0));
-	float2 Right  = SampleVelocity(Coord + int2(1, 0));
-	float2 Up     = SampleVelocity(Coord + int2(0, 1));
-	float2 Down   = SampleVelocity(Coord + int2(0, -1));
-	
-	return (Left + Right + Up + Down - 4.0 * Center) / (CellSize * CellSize);
-}
-
-// Compute gradient of height field
-float2 ComputeHeightGradient(int2 Coord)
-{
-	float Right = SampleHeight(Coord + int2(1, 0));
-	float Left  = SampleHeight(Coord + int2(-1, 0));
-	float Up    = SampleHeight(Coord + int2(0, 1));
-	float Down  = SampleHeight(Coord + int2(0, -1));
-	
-	return float2(
-		(Right - Left) / (2.0 * CellSize),
-		(Up - Down) / (2.0 * CellSize)
-	);
-}
-
-// Compute divergence of velocity field (for continuity equation)
-float ComputeVelocityDivergence(int2 Coord)
-{
-	float2 Right = SampleVelocity(Coord + int2(1, 0));
-	float2 Left  = SampleVelocity(Coord + int2(-1, 0));
-	float2 Up    = SampleVelocity(Coord + int2(0, 1));
-	float2 Down  = SampleVelocity(Coord + int2(0, -1));
-	
-	float dUdx = (Right.x - Left.x) / (2.0 * CellSize);
-	float dVdy = (Up.y - Down.y) / (2.0 * CellSize);
-	
-	return dUdx + dVdy;
 }
 
 float2 GridToWorld(int2 Coord)
@@ -119,8 +80,8 @@ void AdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float2 newVel = Texture2DSampleLevel(CurrentVelocityField, LinearSampler, uv, 0).xy;
 	
 	// Write output
-	NextHeightField[Coord] = newHeight;
-	NextVelocityField[Coord] = newVel;
+	NextHeightField[Coord] = newHeight * AdvectionDamping;
+	NextVelocityField[Coord] = newVel * AdvectionDamping;
 }
 
 Texture2D PrevHeightField;
