@@ -31,6 +31,27 @@ static TAutoConsoleVariable<bool> CVarShallowWaterDiffusion(
 	ECVF_Scalability | ECVF_RenderThreadSafe
 );
 
+static TAutoConsoleVariable<bool> CVarNavierStokesAdvection(
+	TEXT("r.NavierStokes.Advection"),
+	true,
+	TEXT("Whether open Navier-Stokes advection"),
+	ECVF_Scalability | ECVF_RenderThreadSafe
+);
+
+static TAutoConsoleVariable<bool> CVarNavierStokesDiffusion(
+	TEXT("r.NavierStokes.Diffusion"),
+	true,
+	TEXT("Whether open Navier-Stokes diffusion"),
+	ECVF_Scalability | ECVF_RenderThreadSafe
+);
+
+static TAutoConsoleVariable<bool> CVarNavierStokesProjection(
+	TEXT("r.NavierStokes.Projection"),
+	true,
+	TEXT("Whether open Navier-Stokes projection"),
+	ECVF_Scalability | ECVF_RenderThreadSafe
+);
+
 
 // ============================================================================
 // FWaterFieldSceneExtension
@@ -496,6 +517,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 	SceneData->CurrentInteractions.Reset();
 
 	// 1) Advection: VelocityRT[cur] → NextVelocityRT
+	if (CVarNavierStokesAdvection.GetValueOnRenderThread())
 	{
 		const TShaderMapRef<FNSAdvectionCS> AdvectionCS(GlobalShaderMap);
 		FNSAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSAdvectionCS::FParameters>();
@@ -525,7 +547,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 	//    Solves implicit diffusion: (I - ν·Δt·∇²) u^{n+1} = u^n
 	int32 NumDiffusionJacobiIterations = FMath::Max(Config.NS_NumDiffusionJacobiIterations, 1);
 	NumDiffusionJacobiIterations -= NumDiffusionJacobiIterations % 2;
-	if (NumDiffusionJacobiIterations > 0)
+	if (NumDiffusionJacobiIterations > 0 && CVarNavierStokesDiffusion.GetValueOnRenderThread())
 	{
 		const TShaderMapRef<FNSDiffusionCS> DiffusionCS(GlobalShaderMap);
 
@@ -568,6 +590,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 	}
 
 	// 3) Compute Divergence: VelocityRT[next] → DivergenceRT
+	if (CVarNavierStokesProjection.GetValueOnRenderThread())
 	{
 		const TShaderMapRef<FNSComputeDivergenceCS> ComputeDivergenceCS(GlobalShaderMap);
 		FNSComputeDivergenceCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSComputeDivergenceCS::FParameters>();
@@ -586,6 +609,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 	}
 
 	// 4) Pressure Solve: Jacobi iterations (ping-pong PressureRT ↔ TempPressureRT)
+	if (CVarNavierStokesProjection.GetValueOnRenderThread())
 	{
 		const int32 NumPressureJacobiIterations = FMath::Max(Config.NS_NumPressureJacobiIterations, 1);
 		const TShaderMapRef<FNSPressureSolveCS> PressureSolveCS(GlobalShaderMap);
@@ -622,11 +646,11 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 		}
 	}
 
-	// Re-register pressure after potential swap
-	PressureRef = GraphBuilder.RegisterExternalTexture(SceneData->PressureFieldRT);
-
 	// 5) Projection: VelocityRT[next] + PressureRT → VelocityRT[cur]
+	if (CVarNavierStokesProjection.GetValueOnRenderThread())
 	{
+		// Re-register pressure after potential swap
+		PressureRef = GraphBuilder.RegisterExternalTexture(SceneData->PressureFieldRT);
 		const TShaderMapRef<FNSProjectionCS> ProjectionCS(GlobalShaderMap);
 		FNSProjectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSProjectionCS::FParameters>();
 		Parameters->GridSize = GridSize;

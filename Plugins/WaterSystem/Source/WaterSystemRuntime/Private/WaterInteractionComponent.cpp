@@ -75,7 +75,7 @@ void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 			CurrentInteractionData.Position = FVector2D(CurrentPosition.X, CurrentPosition.Y);
 			CurrentInteractionData.ForceDirection = Velocity2D.GetSafeNormal();
 			CurrentInteractionData.RadiusParameter = FVector2D(Radius, Width);
-			CurrentInteractionData.StrengthParameter = FVector(DirectionalStrength, OmniStrength, VortexStrength);
+			CurrentInteractionData.StrengthParameter = FVector(DirectionalStrength * Speed2D, OmniStrength, VortexStrength);
 			CurrentInteractionData.HeightIntensity = HeightIntensity;
 			CurrentInteractionData.PowerFalloff = PowerFalloff;
 			CurrentInteractionData.ShapeType = ShapeType;

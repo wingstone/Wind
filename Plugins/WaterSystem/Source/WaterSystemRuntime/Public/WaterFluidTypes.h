@@ -70,8 +70,8 @@ struct FWaterFluidConfig
 	float WaterLevel = 5.0f;
 
 	/** Viscosity coefficient */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "100", UIMin = "0", UIMax = "100"))
-	float NS_Viscosity = 0.95f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", UIMin = "0", UIMax = "10000"))
+	float NS_Viscosity = 0.01f;
 
 	/** Number of Jacobi iterations for pressure solve */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "1", ClampMax = "100", UIMin = "1", UIMax = "50"))
