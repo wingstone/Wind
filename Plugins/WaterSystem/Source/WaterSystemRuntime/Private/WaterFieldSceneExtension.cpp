@@ -478,8 +478,35 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 	FRDGTextureRef PressureRef = GraphBuilder.RegisterExternalTexture(SceneData->PressureFieldRT);
 	FRDGTextureRef TempPressureRef = GraphBuilder.RegisterExternalTexture(SceneData->TempPressureFieldRT);
 	FRDGTextureRef DivergenceRef = GraphBuilder.RegisterExternalTexture(SceneData->DivergenceFieldRT);
+	
+	// 0) Advection: VelocityRT[cur] → NextVelocityRT
+	if (CVarNavierStokesAdvection.GetValueOnRenderThread())
+	{
+		const TShaderMapRef<FNSAdvectionCS> AdvectionCS(GlobalShaderMap);
+		FNSAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSAdvectionCS::FParameters>();
+		Parameters->GridSize = GridSize;
+		Parameters->DeltaTime = Config.TimeStep;
+		Parameters->CellSize = CellSize;
+		Parameters->Damping = FMath::Clamp(Config.NS_Damping, 0.0f, 1.0f);
+		Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+		Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
+		Parameters->OutVelocityField = GraphBuilder.CreateUAV(VelocityRefs[(SceneData->CurrentVelocityIndex + 1) % 3]);
+		Parameters->DensityField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
+		Parameters->OutDensityField = GraphBuilder.CreateUAV(HeightRefs[(SceneData->CurrentHeightIndex + 1) % 3]);
+		
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Water.NS.Advection"),
+			ERDGPassFlags::Compute,
+			AdvectionCS,
+			Parameters,
+			GroupCount);
+			
+			SceneData->CurrentVelocityIndex = (SceneData->CurrentVelocityIndex + 1) % 3;
+			SceneData->CurrentHeightIndex = (SceneData->CurrentHeightIndex + 1) % 3;
+	}
 
-	// 0) Apply interaction impulses
+	// 1) Apply interaction impulses
 	if (SceneData->CurrentInteractions.Num() > 0)
 	{
 		FWaterInteractionApplicationCS::FPermutationDomain PermutationVector;
@@ -515,34 +542,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 		}
 	}
 	SceneData->CurrentInteractions.Reset();
-
-	// 1) Advection: VelocityRT[cur] → NextVelocityRT
-	if (CVarNavierStokesAdvection.GetValueOnRenderThread())
-	{
-		const TShaderMapRef<FNSAdvectionCS> AdvectionCS(GlobalShaderMap);
-		FNSAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSAdvectionCS::FParameters>();
-		Parameters->GridSize = GridSize;
-		Parameters->DeltaTime = Config.TimeStep;
-		Parameters->CellSize = CellSize;
-		Parameters->Damping = FMath::Clamp(Config.NS_Damping, 0.0f, 1.0f);
-		Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-		Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
-		Parameters->OutVelocityField = GraphBuilder.CreateUAV(VelocityRefs[(SceneData->CurrentVelocityIndex + 1) % 3]);
-		Parameters->DensityField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
-		Parameters->OutDensityField = GraphBuilder.CreateUAV(HeightRefs[(SceneData->CurrentHeightIndex + 1) % 3]);
-
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("Water.NS.Advection"),
-			ERDGPassFlags::Compute,
-			AdvectionCS,
-			Parameters,
-			GroupCount);
-
-		SceneData->CurrentVelocityIndex = (SceneData->CurrentVelocityIndex + 1) % 3;
-		SceneData->CurrentHeightIndex = (SceneData->CurrentHeightIndex + 1) % 3;
-	}
-
+		
 	// 2) Diffusion: Jacobi iterations (VelocityRT as source, ping-pong VelocityRTs)
 	//    Solves implicit diffusion: (I - ν·Δt·∇²) u^{n+1} = u^n
 	int32 NumDiffusionJacobiIterations = FMath::Max(Config.NS_NumDiffusionJacobiIterations, 1);
