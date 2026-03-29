@@ -377,3 +377,60 @@ class FNSProjectionCS : public FGlobalShader
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
 	}
 };
+
+/**
+ * NS Vorticity Confinement Step A: Compute scalar vorticity
+ */
+class FNSComputeVorticityCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FNSComputeVorticityCS);
+	SHADER_USE_PARAMETER_STRUCT(FNSComputeVorticityCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(int32, GridSize)
+		SHADER_PARAMETER(float, CellSize)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, VelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVorticityField)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};
+
+/**
+ * NS Vorticity Confinement Step B: Apply confinement force
+ */
+class FNSVorticityConfinementCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FNSVorticityConfinementCS);
+	SHADER_USE_PARAMETER_STRUCT(FNSVorticityConfinementCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(int32, GridSize)
+		SHADER_PARAMETER(float, DeltaTime)
+		SHADER_PARAMETER(float, CellSize)
+		SHADER_PARAMETER(float, VorticityEpsilon)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, VelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, VorticityField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVelocityField)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};

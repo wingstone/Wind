@@ -36,13 +36,18 @@ Texture2D PressureField;
 Texture2D DivergenceField;
 Texture2D DensityField;
 Texture2D OriginalDensityField;
+Texture2D VorticityField;
 SamplerState LinearSampler;
+
+// Vorticity confinement
+float VorticityEpsilon;
 
 // Texture outputs (UAV)
 RWTexture2D<float2> OutVelocityField;
 RWTexture2D<float> OutPressureField;
 RWTexture2D<float> OutDivergenceField;
 RWTexture2D<float> OutDensityField;
+RWTexture2D<float> OutVorticityField;
 
 // Load velocity with boundary clamping
 float2 LoadVelocity(int2 Coord)
@@ -225,6 +230,79 @@ void ProjectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	// Stability clamp
 	Vel = clamp(Vel, -1000.0, 1000.0);
+
+	OutVelocityField[Coord] = Vel;
+}
+
+//=============================================================================
+// Vorticity Confinement (GPU Gems method)
+//   Step A: Compute scalar vorticity  ω = ∂v/∂x - ∂u/∂y
+//   Step B: Compute confinement force  f = ε·h·(N × ω̂)
+//           where N = normalize(∇|ω|), ω̂ = (0,0,ω)
+//=============================================================================
+
+// Load vorticity with boundary clamping
+float LoadVorticity(int2 Coord)
+{
+	Coord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
+	return VorticityField.Load(int3(Coord, 0)).x;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void ComputeVorticityCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+
+	if (any(Coord >= GridSize))
+		return;
+
+	// Central differences for curl: ω = ∂v/∂x - ∂u/∂y
+	float2 vL = LoadVelocity(Coord + int2(-1, 0));
+	float2 vR = LoadVelocity(Coord + int2( 1, 0));
+	float2 vD = LoadVelocity(Coord + int2( 0,-1));
+	float2 vU = LoadVelocity(Coord + int2( 0, 1));
+
+	float Omega = (vR.y - vL.y - vD.x + vU.x) / (2.0 * CellSize);
+
+	OutVorticityField[Coord] = Omega;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void VorticityConfinementCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+
+	if (any(Coord >= GridSize))
+		return;
+
+	float2 Vel = LoadVelocity(Coord);
+
+	// Boundary: skip edges
+	if (Coord.x == 0 || Coord.x == GridSize - 1 || Coord.y == 0 || Coord.y == GridSize - 1)
+	{
+		OutVelocityField[Coord] = Vel;
+		return;
+	}
+
+	// Sample vorticity at neighbors
+	float omegaL = LoadVorticity(Coord + int2(-1, 0));
+	float omegaR = LoadVorticity(Coord + int2( 1, 0));
+	float omegaD = LoadVorticity(Coord + int2( 0,-1));
+	float omegaU = LoadVorticity(Coord + int2( 0, 1));
+	float omegaC = LoadVorticity(Coord);
+
+	// η = ∇|ω|  (gradient of vorticity magnitude)
+	float2 Eta = float2(abs(omegaR) - abs(omegaL), abs(omegaU) - abs(omegaD)) / (2.0 * CellSize);
+
+	// N = normalize(η)
+	float EtaLen = length(Eta);
+	float2 N = (EtaLen > 1e-5) ? (Eta / EtaLen) : float2(0, 0);
+
+	// Confinement force: f = ε · h · (N × ω̂)
+	// In 2D with ω̂ = (0,0,ω): cross(N, ω̂) = (N.y·ω, -N.x·ω)
+	float2 ConfinementForce = VorticityEpsilon * CellSize * float2(N.y, -N.x) * omegaC;
+
+	Vel += ConfinementForce * DeltaTime;
 
 	OutVelocityField[Coord] = Vel;
 }

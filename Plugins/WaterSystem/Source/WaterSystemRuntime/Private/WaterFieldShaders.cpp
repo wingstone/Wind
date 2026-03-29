@@ -20,3 +20,7 @@ IMPLEMENT_GLOBAL_SHADER(FNSDiffusionCS, "/Plugin/WaterSystem/Private/NavierStoke
 IMPLEMENT_GLOBAL_SHADER(FNSComputeDivergenceCS, "/Plugin/WaterSystem/Private/NavierStokesSolver2D.usf", "ComputeDivergenceCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FNSPressureSolveCS, "/Plugin/WaterSystem/Private/NavierStokesSolver2D.usf", "PressureSolveCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FNSProjectionCS, "/Plugin/WaterSystem/Private/NavierStokesSolver2D.usf", "ProjectionCS", SF_Compute);
+
+// Navier-Stokes Vorticity Confinement
+IMPLEMENT_GLOBAL_SHADER(FNSComputeVorticityCS, "/Plugin/WaterSystem/Private/NavierStokesSolver2D.usf", "ComputeVorticityCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FNSVorticityConfinementCS, "/Plugin/WaterSystem/Private/NavierStokesSolver2D.usf", "VorticityConfinementCS", SF_Compute);

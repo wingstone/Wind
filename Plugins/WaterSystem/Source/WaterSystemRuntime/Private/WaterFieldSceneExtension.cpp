@@ -52,6 +52,13 @@ static TAutoConsoleVariable<bool> CVarNavierStokesProjection(
 	ECVF_Scalability | ECVF_RenderThreadSafe
 );
 
+static TAutoConsoleVariable<bool> CVarNavierStokesVorticityConfinement(
+	TEXT("r.NavierStokes.VorticityConfinement"),
+	true,
+	TEXT("Whether open Navier-Stokes vorticity confinement"),
+	ECVF_Scalability | ECVF_RenderThreadSafe
+);
+
 
 // ============================================================================
 // FWaterFieldSceneExtension
@@ -144,6 +151,7 @@ void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate
 	PressureFieldRT.SafeRelease();
 	TempPressureFieldRT.SafeRelease();
 	DivergenceFieldRT.SafeRelease();
+	VorticityFieldRT.SafeRelease();
 }
 
 // ============================================================================
@@ -587,6 +595,60 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 
 		SceneData->CurrentVelocityIndex = (SceneData->CurrentVelocityIndex + 1) % 3;
 		SceneData->CurrentHeightIndex = (SceneData->CurrentHeightIndex + 1) % 3;
+	}
+
+	// 2.5) Vorticity Confinement (GPU Gems): restore small-scale rotational detail
+	//      Step A: compute scalar vorticity ω = curl(u)
+	//      Step B: apply confinement force f = ε·h·(N × ω̂)
+	if (Config.NS_VorticityConfinement > 0.0f && CVarNavierStokesVorticityConfinement.GetValueOnRenderThread())
+	{
+		// Ensure vorticity texture exists
+		if (!SceneData->VorticityFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(FIntPoint(GridSize, GridSize)), SceneData->VorticityFieldRT, TEXT("VorticityFieldRT"));
+		}
+		FRDGTextureRef VorticityRef = GraphBuilder.RegisterExternalTexture(SceneData->VorticityFieldRT);
+
+		// Step A: Compute vorticity
+		{
+			const TShaderMapRef<FNSComputeVorticityCS> ComputeVorticityCS(GlobalShaderMap);
+			FNSComputeVorticityCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSComputeVorticityCS::FParameters>();
+			Parameters->GridSize = GridSize;
+			Parameters->CellSize = CellSize;
+			Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
+			Parameters->OutVorticityField = GraphBuilder.CreateUAV(VorticityRef);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("Water.NS.ComputeVorticity"),
+				ERDGPassFlags::Compute,
+				ComputeVorticityCS,
+				Parameters,
+				GroupCount);
+		}
+
+		// Step B: Apply confinement force
+		{
+			const TShaderMapRef<FNSVorticityConfinementCS> VorticityConfinementCS(GlobalShaderMap);
+			FNSVorticityConfinementCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSVorticityConfinementCS::FParameters>();
+			Parameters->GridSize = GridSize;
+			Parameters->DeltaTime = Config.TimeStep;
+			Parameters->CellSize = CellSize;
+			Parameters->VorticityEpsilon = Config.NS_VorticityConfinement;
+			Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
+			Parameters->VorticityField = GraphBuilder.CreateSRV(VorticityRef);
+			Parameters->OutVelocityField = GraphBuilder.CreateUAV(VelocityRefs[(SceneData->CurrentVelocityIndex + 1) % 3]);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("Water.NS.VorticityConfinement"),
+				ERDGPassFlags::Compute,
+				VorticityConfinementCS,
+				Parameters,
+				GroupCount);
+
+			SceneData->CurrentVelocityIndex = (SceneData->CurrentVelocityIndex + 1) % 3;
+		}
 	}
 
 	// 3) Compute Divergence: VelocityRT[next] → DivergenceRT

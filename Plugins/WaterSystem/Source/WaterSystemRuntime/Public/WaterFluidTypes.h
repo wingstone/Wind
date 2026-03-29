@@ -85,6 +85,10 @@ struct FWaterFluidConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float NS_Damping = 1.0f;
 
+	/** Vorticity confinement strength (epsilon). Higher values restore small-scale rotational detail lost to numerical dissipation. 0 = disabled. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", UIMin = "0", UIMax = "10"))
+	float NS_VorticityConfinement = 0.0f;
+
 	/** Shallow water damping factor */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float SW_Damping = 0.95f;
