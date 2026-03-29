@@ -34,19 +34,27 @@ Texture2D VelocityField;
 Texture2D OriginalVelocityField;
 Texture2D PressureField;
 Texture2D DivergenceField;
+Texture2D DensityField;
+Texture2D OriginalDensityField;
 SamplerState LinearSampler;
 
 // Texture outputs (UAV)
-RWTexture2D<float2> TempVelocityField;
 RWTexture2D<float2> OutVelocityField;
 RWTexture2D<float> OutPressureField;
 RWTexture2D<float> OutDivergenceField;
+RWTexture2D<float> OutDensityField;
 
 // Load velocity with boundary clamping
 float2 LoadVelocity(int2 Coord)
 {
 	Coord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
 	return VelocityField.Load(int3(Coord, 0)).xy;
+}
+
+float LoadDensity(int2 Coord)
+{
+	Coord = clamp(Coord, int2(0, 0), int2(GridSize - 1, GridSize - 1));
+	return DensityField.Load(int3(Coord, 0)).x;
 }
 
 // Load pressure with boundary clamping
@@ -78,18 +86,21 @@ void AdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	// Bilinear sample at back-traced position
 	float2 NewVel = VelocityField.SampleLevel(LinearSampler, BackUV, 0).xy;
+	float NewDensity = DensityField.SampleLevel(LinearSampler, BackUV, 0).x;
 
 	// Apply damping
-	NewVel *= (1.0 - Damping * DeltaTime);
+	NewVel *= Damping;
+	NewDensity *= Damping;
 
-	TempVelocityField[Coord] = NewVel;
+	OutVelocityField[Coord] = NewVel;
+	OutDensityField[Coord] = NewDensity;
 }
 
 //=============================================================================
 // Step 2: Diffusion (Implicit viscosity via Jacobi iteration)
 //   Solves (I - ν·Δt·∇²) u^{n+1} = u^n  using Jacobi relaxation:
-//   u^{k+1}_{i,j} = (u^n_{i,j} + α·(u^k neighbors)) / (1 + 4α)
-//   where α = ν·Δt / h²
+//   u^{k+1}_{i,j} = (u^n_{i,j}·α + (u^k neighbors)) / (1 + 4α)
+//   where α = h² / ν·Δt
 //=============================================================================
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
 void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
@@ -106,8 +117,8 @@ void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	float Alpha = Viscosity * DeltaTime / (CellSize * CellSize);
-	float InvBeta = 1.0 / (1.0 + 4.0 * Alpha);
+	float Alpha = (CellSize * CellSize) / (Viscosity * DeltaTime);
+	float InvBeta = 1.0 / (4.0 + Alpha);
 
 	// Original velocity from advection step (constant source term)
 	float2 Original = OriginalVelocityField.Load(int3(Coord, 0)).xy;
@@ -117,10 +128,20 @@ void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float2 Right = LoadVelocity(Coord + int2(1, 0));
 	float2 Up    = LoadVelocity(Coord + int2(0, 1));
 	float2 Down  = LoadVelocity(Coord + int2(0, -1));
+	float2 NewVel = (Original * Alpha + (Left + Right + Up + Down)) * InvBeta;
 
-	float2 NewVel = (Original + Alpha * (Left + Right + Up + Down)) * InvBeta;
+	// Original density from advection step (constant source term)
+	float OriginDensity = OriginalDensityField.Load(int3(Coord, 0)).x;
+
+	// Neighbors from previous Jacobi iteration
+	float LeftDensity  = LoadDensity(Coord + int2(-1, 0));
+	float RightDensity = LoadDensity(Coord + int2(1, 0));
+	float UpDensity    = LoadDensity(Coord + int2(0, 1));
+	float DownDensity  = LoadDensity(Coord + int2(0, -1));
+	float NewDensity = (OriginDensity * Alpha + (LeftDensity + RightDensity + UpDensity + DownDensity)) * InvBeta;
 
 	OutVelocityField[Coord] = NewVel;
+	OutDensityField[Coord] = NewDensity;
 }
 
 //=============================================================================
@@ -139,7 +160,7 @@ void ComputeDivergenceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float2 Up    = LoadVelocity(Coord + int2(0, 1));
 	float2 Down  = LoadVelocity(Coord + int2(0, -1));
 
-	float Div = (Right.x - Left.x + Up.y - Down.y) / (2.0 * CellSize);
+	float Div = (Right.x - Left.x + Down.y - Up.y) / (2.0 * CellSize);
 
 	OutDivergenceField[Coord] = Div;
 }
@@ -169,7 +190,7 @@ void PressureSolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	float Div = DivergenceField.Load(int3(Coord, 0)).x;
 
-	float NewPressure = 0.25 * (pLeft + pRight + pUp + pDown - CellSize * CellSize * Density * Div / DeltaTime);
+	float NewPressure = 0.25 * (pLeft + pRight + pUp + pDown - CellSize * CellSize * Div);
 
 	OutPressureField[Coord] = NewPressure;
 }
@@ -193,8 +214,8 @@ void ProjectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float pUp    = LoadPressure(Coord + int2(0, 1));
 	float pDown  = LoadPressure(Coord + int2(0, -1));
 
-	float2 PressureGrad = float2(pRight - pLeft, pUp - pDown) / (2.0 * CellSize);
-	Vel -= DeltaTime / Density * PressureGrad;
+	float2 PressureGrad = float2(pRight - pLeft, pDown - pUp) / (2.0 * CellSize);
+	Vel -= PressureGrad;
 
 	// Boundary: zero velocity at edges
 	if (Coord.x == 0 || Coord.x == GridSize - 1 || Coord.y == 0 || Coord.y == GridSize - 1)

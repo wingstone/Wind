@@ -8,7 +8,7 @@ UWaterInteractionComponent::UWaterInteractionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	bAutoActivate = true;
-	bIsIntersectionUseful = false;
+	bIsInteractionUseful = false;
 }
 
 void UWaterInteractionComponent::BeginPlay()
@@ -30,7 +30,7 @@ void UWaterInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickT
 
 	if (!bEnableInteraction)
 	{
-		bIsIntersectionUseful = false;
+		bIsInteractionUseful = false;
 		return;
 	}
 
@@ -70,7 +70,7 @@ void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 
 		if (Speed2D > MinSpeedForInteraction) // Minimum speed to generate waves
 		{
-			bIsIntersectionUseful = true;
+			bIsInteractionUseful = true;
 
 			CurrentInteractionData.Position = FVector2D(CurrentPosition.X, CurrentPosition.Y);
 			CurrentInteractionData.ForceDirection = Velocity2D.GetSafeNormal();
@@ -83,12 +83,12 @@ void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 		}
 		else
 		{
-			bIsIntersectionUseful = false;
+			bIsInteractionUseful = false;
 		}
 	}
 	else
 	{
-		bIsIntersectionUseful = false;
+		bIsInteractionUseful = false;
 	}
 }
 

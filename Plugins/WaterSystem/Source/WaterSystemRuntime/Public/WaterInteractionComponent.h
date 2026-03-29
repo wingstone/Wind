@@ -69,7 +69,7 @@ public:
 
 public:
 	FWaterInteractionData GetCurrentInteractionData() const { return CurrentInteractionData; }
-	bool IsInteractionUseful() const { return bEnableInteraction; }
+	bool IsInteractionUseful() const { return bEnableInteraction && bIsInteractionUseful; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -80,7 +80,7 @@ private:
 	/** Cached previous world position for velocity estimation */
 	FVector LastPosition = FVector::ZeroVector;
 	FWaterInteractionData CurrentInteractionData;
-	bool bIsIntersectionUseful;
+	bool bIsInteractionUseful;
 
 	void RegisterWithSubsystem();
 	void UnregisterFromSubsystem();

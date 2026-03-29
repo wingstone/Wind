@@ -11,20 +11,45 @@
 /**
  * SW Step 1: Advection (Semi-Lagrangian)
  */
-class FSWAdvectionCS : public FGlobalShader
+class FSWHeightAdvectionCS : public FGlobalShader
 {
-	DECLARE_GLOBAL_SHADER(FSWAdvectionCS);
-	SHADER_USE_PARAMETER_STRUCT(FSWAdvectionCS, FGlobalShader);
+	DECLARE_GLOBAL_SHADER(FSWHeightAdvectionCS);
+	SHADER_USE_PARAMETER_STRUCT(FSWHeightAdvectionCS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER(uint32, GridSize)
 		SHADER_PARAMETER(float, CellSize)
 		SHADER_PARAMETER(FVector2f, GridOrigin)
 		SHADER_PARAMETER(float, DeltaTime)
-		SHADER_PARAMETER(float, AdvectionDamping)
 		SHADER_PARAMETER_SAMPLER(SamplerState, LinearSampler)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentVelocityField)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentHeightField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};
+
+class FSWVelocityAdvectionCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FSWVelocityAdvectionCS);
+	SHADER_USE_PARAMETER_STRUCT(FSWVelocityAdvectionCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(uint32, GridSize)
+		SHADER_PARAMETER(float, CellSize)
+		SHADER_PARAMETER(FVector2f, GridOrigin)
+		SHADER_PARAMETER(float, DeltaTime)
+		SHADER_PARAMETER_SAMPLER(SamplerState, LinearSampler)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentVelocityField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextVelocityField)
 	END_SHADER_PARAMETER_STRUCT()
@@ -182,6 +207,10 @@ class FWaterInteractionApplicationCS : public FGlobalShader
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, HeightField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, VelocityField)
 	END_SHADER_PARAMETER_STRUCT()
+	
+	class FApplyVelocity : SHADER_PERMUTATION_BOOL("APPLY_VELOCITY");
+
+	using FPermutationDomain = TShaderPermutationDomain<FApplyVelocity>;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
@@ -214,7 +243,9 @@ class FNSAdvectionCS : public FGlobalShader
 		SHADER_PARAMETER(float, Damping)
 		SHADER_PARAMETER_SAMPLER(SamplerState, LinearSampler)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, VelocityField)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, TempVelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, DensityField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutDensityField)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -245,6 +276,9 @@ class FNSDiffusionCS : public FGlobalShader
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, VelocityField)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, OriginalVelocityField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, DensityField)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, OriginalDensityField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutDensityField)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -298,7 +332,6 @@ class FNSPressureSolveCS : public FGlobalShader
 		SHADER_PARAMETER(int32, GridSize)
 		SHADER_PARAMETER(float, DeltaTime)
 		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(float, Density)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, PressureField)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, DivergenceField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutPressureField)
@@ -328,7 +361,6 @@ class FNSProjectionCS : public FGlobalShader
 		SHADER_PARAMETER(int32, GridSize)
 		SHADER_PARAMETER(float, DeltaTime)
 		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(float, Density)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, VelocityField)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, PressureField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVelocityField)

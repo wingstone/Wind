@@ -26,7 +26,6 @@ uint GridSize;
 float CellSize;
 float2 GridOrigin;
 float DeltaTime;
-float AdvectionDamping;
 SamplerState LinearSampler;
 Texture2D CurrentHeightField;
 RWTexture2D<float> NextHeightField;
@@ -57,7 +56,7 @@ float2 WorldToUV(float2 WorldPos)
 }
 
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
-void AdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+void HeightAdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	int2 Coord = int2(DispatchThreadId.xy);
 	
@@ -69,19 +68,44 @@ void AdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float h = SampleHeight(Coord);
 	float2 vel = SampleVelocity(Coord);
 	
-	float2 WorldPos = GridToWorld(Coord);
+	// UV of current cell center
+	float2 UV = (float2(Coord) + 0.5) / float(GridSize);
 	
-	// Trace backwards in time
-	float2 BackPos = WorldPos - vel * DeltaTime;
-	float2 uv = WorldToUV(BackPos);
+	// Trace backwards in time (convert world velocity to UV displacement)
+	float WorldSize = CellSize * float(GridSize);
+	float2 BackUV = UV - vel * DeltaTime / WorldSize;
 	
-	// Sample velocity at back-traced position
-	float newHeight = Texture2DSampleLevel(CurrentHeightField, LinearSampler, uv, 0).x;
-	float2 newVel = Texture2DSampleLevel(CurrentVelocityField, LinearSampler, uv, 0).xy;
+	// Sample height at back-traced position
+	float newHeight = Texture2DSampleLevel(CurrentHeightField, LinearSampler, BackUV, 0).x;
 	
 	// Write output
-	NextHeightField[Coord] = newHeight * AdvectionDamping;
-	NextVelocityField[Coord] = newVel * AdvectionDamping;
+	NextHeightField[Coord] = newHeight;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void VelocityAdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	// Boundary check
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	// Current state
+	float2 vel = SampleVelocity(Coord);
+	
+	// UV of current cell center
+	float2 UV = (float2(Coord) + 0.5) / float(GridSize);
+	
+	// Trace backwards in time (convert world velocity to UV displacement)
+	float WorldSize = CellSize * float(GridSize);
+	float2 BackUV = UV - vel * DeltaTime / WorldSize;
+
+	// Sample velocity at back-traced position
+	float2 newVel = Texture2DSampleLevel(CurrentVelocityField, LinearSampler, BackUV, 0).xy;
+	
+	// Write output
+	NextVelocityField[Coord] = newVel;
 }
 
 Texture2D PrevHeightField;

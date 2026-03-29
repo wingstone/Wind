@@ -84,7 +84,7 @@ private:
 
 	// --- GPU Resources (render thread owned) ---
 	TRefCountPtr<IPooledRenderTarget> HeightFieldRT[3];
-	TRefCountPtr<IPooledRenderTarget> VelocityFieldRT[2];
+	TRefCountPtr<IPooledRenderTarget> VelocityFieldRT[3];
 	TRefCountPtr<IPooledRenderTarget> NormalFieldRT;
 
 	TRefCountPtr<IPooledRenderTarget> TempHeightFieldRT;
@@ -100,6 +100,6 @@ private:
 	FVector2f WorldGridCenter;
 	FIntVector2 GridScrollOffset;
 
-	uint32 CurrentHeightIndex = 1;
+	uint32 CurrentHeightIndex = 0;
 	uint32 CurrentVelocityIndex = 0;
 };

@@ -183,17 +183,20 @@ void UWaterSubsystem::UpdateInteractions()
 				InteractionsToApply.Add(Component->GetCurrentInteractionData());
 			}
 		}
-		ENQUEUE_RENDER_COMMAND(UpdateInteractions)(
-		[WorldScene = GetWorld()->Scene, InteractionsToApply = InteractionsToApply](FRHICommandListImmediate& RHICmdList) 
-			{
-				if (WorldScene->GetRenderScene())
+		if (InteractionsToApply.Num() > 0)
+		{
+			ENQUEUE_RENDER_COMMAND(UpdateInteractions)(
+			[WorldScene = GetWorld()->Scene, InteractionsToApply = InteractionsToApply](FRHICommandListImmediate& RHICmdList) 
 				{
-					if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
+					if (WorldScene->GetRenderScene())
 					{
-						SceneExtension->SetInteractionsToApply_RenderThread(InteractionsToApply);
+						if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
+						{
+							SceneExtension->SetInteractionsToApply_RenderThread(InteractionsToApply);
+						}
 					}
-				}
-			});
+				});
+		}
 	}
 }
 

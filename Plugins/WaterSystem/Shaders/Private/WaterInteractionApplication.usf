@@ -10,6 +10,10 @@
 #define THREAD_GROUP_SIZE 16
 #endif
 
+#if !defined(APPLY_VELOCITY)
+#define APPLY_VELOCITY 0
+#endif
+
 int GridSize;
 float CellSize;
 float2 GridOrigin;
@@ -65,8 +69,9 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	float Height = InteractionHeightIntensity * Falloff;
-	HeightField[Coord] = HeightField[Coord] + Height;
+	HeightField[Coord] += Height;
 
+#if APPLY_VELOCITY
 	float2 Velocity = 0.0f;
 	if (InteractionEmissionTypeMask & 0x1) // Directional
 	{
@@ -86,4 +91,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		Velocity += TangentialDir * InteractionVortexStrength * Falloff;
 	}
 	VelocityField[Coord] += Velocity;
+#endif
 }
