@@ -76,6 +76,14 @@ struct FWaterFluidConfig
 	/** Viscosity coefficient */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navier Stokes Parameters", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float Viscosity = 0.95f;
+
+	/** Number of Jacobi iterations for pressure solve */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navier Stokes Parameters", meta = (ClampMin = "1", ClampMax = "100", UIMin = "1", UIMax = "50"))
+	int32 NumJacobiIterations = 20;
+
+	/** Number of Jacobi iterations for viscous diffusion solve */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navier Stokes Parameters", meta = (ClampMin = "1", ClampMax = "100", UIMin = "1", UIMax = "50"))
+	int32 NumDiffusionIterations = 20;
 	
 	/** Wave damping factor */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shallow Water Parameters", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))

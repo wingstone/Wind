@@ -243,6 +243,7 @@ class FNSDiffusionCS : public FGlobalShader
 		SHADER_PARAMETER(float, CellSize)
 		SHADER_PARAMETER(float, Viscosity)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, VelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, OriginalVelocityField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVelocityField)
 	END_SHADER_PARAMETER_STRUCT()
 

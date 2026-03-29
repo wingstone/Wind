@@ -461,24 +461,47 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 			GroupCount);
 	}
 
-	// 2) Diffusion: TempVelocityRT → VelocityRT[next]
+	// 2) Diffusion: Jacobi iterations (TempVelocityRT as source, ping-pong VelocityRTs)
+	//    Solves implicit diffusion: (I - ν·Δt·∇²) u^{n+1} = u^n
 	{
+		const int32 NumDiffusionIterations = FMath::Max(Config.NumDiffusionIterations, 1);
 		const TShaderMapRef<FNSDiffusionCS> DiffusionCS(GlobalShaderMap);
-		FNSDiffusionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSDiffusionCS::FParameters>();
-		Parameters->GridSize = GridSize;
-		Parameters->DeltaTime = Config.TimeStep;
-		Parameters->CellSize = CellSize;
-		Parameters->Viscosity = Config.Viscosity;
-		Parameters->VelocityField = GraphBuilder.CreateSRV(TempVelocityRef);
-		Parameters->OutVelocityField = GraphBuilder.CreateUAV(VelocityRefs[NextVelIdx]);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("Water.NS.Diffusion"),
-			ERDGPassFlags::Compute,
-			DiffusionCS,
-			Parameters,
-			GroupCount);
+		// Arrange ping-pong so the final result lands in VelocityRefs[NextVelIdx]
+		FRDGTextureRef DiffPing, DiffPong;
+		if (NumDiffusionIterations % 2 == 0)
+		{
+			DiffPing = VelocityRefs[NextVelIdx];
+			DiffPong = VelocityRefs[CurVelIdx];
+		}
+		else
+		{
+			DiffPing = VelocityRefs[CurVelIdx];
+			DiffPong = VelocityRefs[NextVelIdx];
+		}
+
+		for (int32 i = 0; i < NumDiffusionIterations; i++)
+		{
+			FNSDiffusionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSDiffusionCS::FParameters>();
+			Parameters->GridSize = GridSize;
+			Parameters->DeltaTime = Config.TimeStep;
+			Parameters->CellSize = CellSize;
+			Parameters->Viscosity = Config.Viscosity;
+			Parameters->OriginalVelocityField = GraphBuilder.CreateSRV(TempVelocityRef);
+			Parameters->VelocityField = GraphBuilder.CreateSRV((i == 0) ? TempVelocityRef : DiffPing);
+			Parameters->OutVelocityField = GraphBuilder.CreateUAV(DiffPong);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("Water.NS.Diffusion_%d", i),
+				ERDGPassFlags::Compute,
+				DiffusionCS,
+				Parameters,
+				GroupCount);
+
+			Swap(DiffPing, DiffPong);
+		}
+		// After the loop, final result is in DiffPing == VelocityRefs[NextVelIdx]
 	}
 
 	// 3) Compute Divergence: VelocityRT[next] → DivergenceRT
@@ -501,7 +524,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 
 	// 4) Pressure Solve: Jacobi iterations (ping-pong PressureRT ↔ TempPressureRT)
 	{
-		static constexpr int32 NumJacobiIterations = 20;
+		const int32 NumJacobiIterations = FMath::Max(Config.NumJacobiIterations, 1);
 		const TShaderMapRef<FNSPressureSolveCS> PressureSolveCS(GlobalShaderMap);
 
 		FRDGTextureRef PressurePing = PressureRef;
