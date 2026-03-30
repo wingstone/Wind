@@ -26,6 +26,7 @@ uint GridSize;
 float CellSize;
 float2 GridOrigin;
 float DeltaTime;
+float AdvectionDamping;
 SamplerState LinearSampler;
 Texture2D CurrentHeightField;
 RWTexture2D<float> NextHeightField;
@@ -79,7 +80,7 @@ void HeightAdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float newHeight = Texture2DSampleLevel(CurrentHeightField, LinearSampler, BackUV, 0).x;
 	
 	// Write output
-	NextHeightField[Coord] = newHeight;
+	NextHeightField[Coord] = newHeight * AdvectionDamping;
 }
 
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
@@ -105,13 +106,13 @@ void VelocityAdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float2 newVel = Texture2DSampleLevel(CurrentVelocityField, LinearSampler, BackUV, 0).xy;
 	
 	// Write output
-	NextVelocityField[Coord] = newVel;
+	NextVelocityField[Coord] = newVel * AdvectionDamping;
 }
 
 Texture2D PrevHeightField;
 float Alpha;
 float Beta;
-float Damping;
+float DiffusionDamping;
 
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
 void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
@@ -131,7 +132,7 @@ void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	float prev_h = PrevHeightField[Coord].x;
 
-	float newHeight = Damping* ( h + Beta * (h - prev_h) + Alpha * (up_h + down_h + left_h + right_h - 4.0 * h));
+	float newHeight = DiffusionDamping * ( h + Beta * (h - prev_h) + Alpha * (up_h + down_h + left_h + right_h - 4.0 * h));
 	
 	// Write output
 	NextHeightField[Coord] = newHeight;

@@ -342,6 +342,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 				Parameters->CellSize = CellSize;
 				Parameters->GridOrigin = GridOrigin;
 				Parameters->DeltaTime = Config.TimeStep;
+				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
 				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
 				Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
 				Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightRefs[(SceneData->CurrentHeightIndex + 1) % 3]);
@@ -363,6 +364,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 				Parameters->CellSize = CellSize;
 				Parameters->GridOrigin = GridOrigin;
 				Parameters->DeltaTime = Config.TimeStep;
+				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
 				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
 				Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[(SceneData->CurrentHeightIndex + 2) % 3]);
 				Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightRefs[SceneData->CurrentHeightIndex]);
@@ -384,6 +386,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 				Parameters->CellSize = CellSize;
 				Parameters->GridOrigin = GridOrigin;
 				Parameters->DeltaTime = Config.TimeStep;
+				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
 				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
 				Parameters->CurrentVelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
 				Parameters->NextVelocityField = GraphBuilder.CreateUAV(VelocityRefs[(SceneData->CurrentVelocityIndex + 1) % 3]);
@@ -414,7 +417,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 			Parameters->GridOrigin = GridOrigin;
 			Parameters->Alpha = Config.SW_DiffusionAlpha;
 			Parameters->Beta = Config.SW_DiffusionBeta;
-			Parameters->Damping = FMath::Clamp(Config.SW_Damping, 0.0f, 1.0f);
+			Parameters->DiffusionDamping = FMath::Clamp(Config.SW_DiffusionDamping, 0.0f, 1.0f);
 			Parameters->PrevHeightField = GraphBuilder.CreateSRV(HeightRefs[(SceneData->CurrentHeightIndex + 2) % 3]);
 			Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
 			Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightRefs[(SceneData->CurrentHeightIndex + 1) % 3]);

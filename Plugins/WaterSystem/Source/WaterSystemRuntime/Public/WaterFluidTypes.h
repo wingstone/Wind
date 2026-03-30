@@ -89,9 +89,13 @@ struct FWaterFluidConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", UIMin = "0", UIMax = "10"))
 	float NS_VorticityConfinement = 0.0f;
 
-	/** Shallow water damping factor */
+	/** Shallow water diffusion damping factor */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
-	float SW_Damping = 0.95f;
+	float SW_DiffusionDamping = 0.95f;
+
+	/** Shallow water advection damping factor */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float SW_AdvectionDamping = 0.95f;
 	
 	/** Only used for shallow water solver, controls wave diffusion */ 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
