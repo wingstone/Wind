@@ -250,6 +250,32 @@ void FWaterFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder& 
 		}
 	}
 
+	// Scroll pressure field (NS solver uses it as warm-start for Jacobi iterations)
+	if (SceneData->PressureFieldRT && SceneData->TempPressureFieldRT)
+	{
+		const TShaderMapRef<FWaterScrollHeightCS> ScrollCS(GlobalShaderMap);
+
+		FRDGTextureRef Source = GraphBuilder.RegisterExternalTexture(SceneData->PressureFieldRT);
+		FRDGTextureRef Dest = GraphBuilder.RegisterExternalTexture(SceneData->TempPressureFieldRT);
+
+		FWaterScrollHeightCS::FParameters* Params = GraphBuilder.AllocParameters<FWaterScrollHeightCS::FParameters>();
+		Params->GridSize = GridSize;
+		Params->ScrollTexelOffsetX = TexelOffset.X;
+		Params->ScrollTexelOffsetY = TexelOffset.Y;
+		Params->SourceTexture = GraphBuilder.CreateSRV(Source);
+		Params->DestHeightTexture = GraphBuilder.CreateUAV(Dest);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Water.ScrollPressure"),
+			ERDGPassFlags::Compute,
+			ScrollCS,
+			Params,
+			GroupCount);
+
+		Swap(SceneData->PressureFieldRT, SceneData->TempPressureFieldRT);
+	}
+	
 	// Clear scroll offset after applying
 	SceneData->GridScrollOffset = FIntVector2::ZeroValue;
 }
