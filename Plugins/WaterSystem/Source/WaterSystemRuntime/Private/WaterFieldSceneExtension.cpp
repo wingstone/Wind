@@ -16,14 +16,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogWaterFieldSceneExtension, Log, All);
 
 IMPLEMENT_SCENE_EXTENSION(FWaterFieldSceneExtension);
 
-// 打开的必要性不是很大，默认关闭
-static TAutoConsoleVariable<bool> CVarShallowWaterAdvection(
-	TEXT("r.ShallowWater.Advection"),
-	false,
-	TEXT("Whether open shallow water advection"),
-	ECVF_Scalability | ECVF_RenderThreadSafe
-);
-
 static TAutoConsoleVariable<bool> CVarShallowWaterDiffusion(
 	TEXT("r.ShallowWater.Diffusion"),
 	true,
@@ -297,7 +289,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 	if (SceneData->CurrentInteractions.Num() > 0)
 	{
 		FWaterInteractionApplicationCS::FPermutationDomain PermutationVector;
-		PermutationVector.Set< FWaterInteractionApplicationCS::FApplyVelocity >(CVarShallowWaterAdvection.GetValueOnRenderThread());
+		PermutationVector.Set< FWaterInteractionApplicationCS::FApplyVelocity >(false);
 		auto InteractionCS = GlobalShaderMap->GetShader<FWaterInteractionApplicationCS>(PermutationVector);
 		for (const FWaterInteractionData& Interaction : SceneData->CurrentInteractions)
 		{
@@ -330,82 +322,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 	}
 	SceneData->CurrentInteractions.Reset();
 
-	// 2) Semi-Lagrangian advection for height + velocity.
-	if (CVarShallowWaterAdvection.GetValueOnRenderThread())
-	{
-		for (int32 i = 0; i < Config.SimulationSubsteps; i++)
-		{
-			{
-				const TShaderMapRef<FSWHeightAdvectionCS> AdvectionCS(GlobalShaderMap);
-				FSWHeightAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FSWHeightAdvectionCS::FParameters>();
-				Parameters->GridSize = GridSize;
-				Parameters->CellSize = CellSize;
-				Parameters->GridOrigin = GridOrigin;
-				Parameters->DeltaTime = Config.TimeStep;
-				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
-				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
-				Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
-				Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightRefs[(SceneData->CurrentHeightIndex + 1) % 3]);
-				Parameters->CurrentVelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
-
-				FComputeShaderUtils::AddPass(
-					GraphBuilder,
-					RDG_EVENT_NAME("Water.ShallowWater.Advection.Height0"),
-					ERDGPassFlags::Compute,
-					AdvectionCS,
-					Parameters,
-					GroupCount);
-			}
-
-			{
-				const TShaderMapRef<FSWHeightAdvectionCS> AdvectionCS(GlobalShaderMap);
-				FSWHeightAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FSWHeightAdvectionCS::FParameters>();
-				Parameters->GridSize = GridSize;
-				Parameters->CellSize = CellSize;
-				Parameters->GridOrigin = GridOrigin;
-				Parameters->DeltaTime = Config.TimeStep;
-				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
-				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
-				Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[(SceneData->CurrentHeightIndex + 2) % 3]);
-				Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightRefs[SceneData->CurrentHeightIndex]);
-				Parameters->CurrentVelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
-
-				FComputeShaderUtils::AddPass(
-					GraphBuilder,
-					RDG_EVENT_NAME("Water.ShallowWater.Advection.Height1"),
-					ERDGPassFlags::Compute,
-					AdvectionCS,
-					Parameters,
-					GroupCount);
-			}
-
-			{
-				const TShaderMapRef<FSWVelocityAdvectionCS> AdvectionCS(GlobalShaderMap);
-				FSWVelocityAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FSWVelocityAdvectionCS::FParameters>();
-				Parameters->GridSize = GridSize;
-				Parameters->CellSize = CellSize;
-				Parameters->GridOrigin = GridOrigin;
-				Parameters->DeltaTime = Config.TimeStep;
-				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
-				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
-				Parameters->CurrentVelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
-				Parameters->NextVelocityField = GraphBuilder.CreateUAV(VelocityRefs[(SceneData->CurrentVelocityIndex + 1) % 3]);
-
-				FComputeShaderUtils::AddPass(
-					GraphBuilder,
-					RDG_EVENT_NAME("Water.ShallowWater.Advection.Velocity"),
-					ERDGPassFlags::Compute,
-					AdvectionCS,
-					Parameters,
-					GroupCount);
-			}
-				
-			SceneData->CurrentHeightIndex = (SceneData->CurrentHeightIndex + 1) % 3;
-			SceneData->CurrentVelocityIndex = (SceneData->CurrentVelocityIndex + 1) % 3;
-		}
-	}
-
-	// 3) Height diffusion/wave integration step using current and previous heights.
+	// 2) Height diffusion/wave integration step using current and previous heights.
 	if (CVarShallowWaterDiffusion.GetValueOnRenderThread())
 	{
 		for (int32 i = 0; i < Config.SimulationSubsteps; i++)
@@ -434,7 +351,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 		}
 	}
 
-	// 4) Convert solved height field to packed normal XY (RG16F).
+	// 3) Convert solved height field to packed normal XY (RG16F).
 	if (SceneData->NormalFieldRT)
 	{
 		const TShaderMapRef<FWaterHeightToNormalCS> HeightToNormalCS(GlobalShaderMap);

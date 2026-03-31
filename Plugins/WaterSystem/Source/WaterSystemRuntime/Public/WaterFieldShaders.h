@@ -9,67 +9,7 @@
 #include "RenderGraphResources.h"
 
 /**
- * SW Step 1: Advection (Semi-Lagrangian)
- */
-class FSWHeightAdvectionCS : public FGlobalShader
-{
-	DECLARE_GLOBAL_SHADER(FSWHeightAdvectionCS);
-	SHADER_USE_PARAMETER_STRUCT(FSWHeightAdvectionCS, FGlobalShader);
-
-	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER(uint32, GridSize)
-		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(FVector2f, GridOrigin)
-		SHADER_PARAMETER(float, DeltaTime)
-		SHADER_PARAMETER(float, AdvectionDamping)
-		SHADER_PARAMETER_SAMPLER(SamplerState, LinearSampler)
-		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentVelocityField)
-		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentHeightField)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
-	END_SHADER_PARAMETER_STRUCT()
-
-	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-	{
-		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-	}
-
-	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
-	{
-		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
-		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
-	}
-};
-
-class FSWVelocityAdvectionCS : public FGlobalShader
-{
-	DECLARE_GLOBAL_SHADER(FSWVelocityAdvectionCS);
-	SHADER_USE_PARAMETER_STRUCT(FSWVelocityAdvectionCS, FGlobalShader);
-
-	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER(uint32, GridSize)
-		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(FVector2f, GridOrigin)
-		SHADER_PARAMETER(float, DeltaTime)
-		SHADER_PARAMETER(float, AdvectionDamping)
-		SHADER_PARAMETER_SAMPLER(SamplerState, LinearSampler)
-		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentVelocityField)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextVelocityField)
-	END_SHADER_PARAMETER_STRUCT()
-
-	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-	{
-		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-	}
-
-	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
-	{
-		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
-		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
-	}
-};
-
-/**
- * SW Step 2: Diffusion
+ * SW Step 1: Diffusion
  */
 class FSWDiffusionCS : public FGlobalShader
 {
@@ -101,7 +41,7 @@ class FSWDiffusionCS : public FGlobalShader
 };
 
 /**
- * SW Step 4: Height to normal conversion
+ * SW Step 2: Height to normal conversion
  */
 class FWaterHeightToNormalCS : public FGlobalShader
 {
