@@ -56,7 +56,7 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UWaterFluidConfigComponent>> RegisteredFluidConfigComponents;
 
-	FIntVector2 LastViewLocationInt = FIntVector2::ZeroValue;
+	FIntVector2 LastScrollTargetLocationInt = FIntVector2::ZeroValue;
 	
 	void ScrollWorldGrid();
 

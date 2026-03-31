@@ -84,35 +84,42 @@ void UWaterSubsystem::UnregisterFluidConfigComponent(UWaterFluidConfigComponent*
 
 void UWaterSubsystem::ScrollWorldGrid()
 {
-	// Get view location
-	FVector ViewLocation = FVector::ZeroVector;
+	// Prefer the player pawn location so the simulation follows gameplay position.
+	FVector ScrollTargetLocation = FVector::ZeroVector;
 	if (UWorld* World = GetWorld())
 	{
 		APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
 		if (PlayerController != nullptr)
 		{
-			ViewLocation = PlayerController->PlayerCameraManager->GetCameraLocation();
+			if (const APawn* PlayerPawn = PlayerController->GetPawn())
+			{
+				ScrollTargetLocation = PlayerPawn->GetActorLocation();
+			}
+			else if (PlayerController->PlayerCameraManager != nullptr)
+			{
+				ScrollTargetLocation = PlayerController->PlayerCameraManager->GetCameraLocation();
+			}
 		}
 		else
 		{
 			auto ViewLocations = World->ViewLocationsRenderedLastFrame;
 			if (ViewLocations.Num() > 0)
 			{
-				ViewLocation = ViewLocations[0];
+				ScrollTargetLocation = ViewLocations[0];
 			}
 		}
 	}
 
-	FIntVector2 ViewLocationInt = FIntVector2(FMath::RoundToInt(ViewLocation.X), FMath::RoundToInt(ViewLocation.Y));
+	FIntVector2 ScrollTargetLocationInt = FIntVector2(FMath::RoundToInt(ScrollTargetLocation.X), FMath::RoundToInt(ScrollTargetLocation.Y));
 	
 	// Update scrolling origin if view has moved significantly to maintain precision
-	FIntVector2 ViewDelta = ViewLocationInt - LastViewLocationInt;
-	int64 ViewDistSq = static_cast<int64>(ViewDelta.X) * ViewDelta.X + static_cast<int64>(ViewDelta.Y) * ViewDelta.Y;
-	if (ViewDistSq > FMath::Square(FluidConfig.WorldSize * 0.25f))
+	FIntVector2 ViewDelta = ScrollTargetLocationInt - LastScrollTargetLocationInt;
+	int32 MaxOffset = FMath::Max(FMath::Abs(ViewDelta.X), FMath::Abs(ViewDelta.Y));
+	if (MaxOffset > FluidConfig.WorldSize * 0.25f)
 	{
 		if (GetWorld() && GetWorld()->Scene)
 		{
-			FIntVector2 ScrollOffset = ViewLocationInt - LastViewLocationInt;
+			FIntVector2 ScrollOffset = ScrollTargetLocationInt - LastScrollTargetLocationInt;
 
 			const uint32 GridSize = FMath::Max(FluidConfig.GridSize, 1);
 			const float CellSize = FluidConfig.WorldSize / static_cast<float>(GridSize);
@@ -120,7 +127,6 @@ void UWaterSubsystem::ScrollWorldGrid()
 			FIntVector2 GridScrollOffset = FIntVector2(
 				FMath::RoundToInt32(ScrollOffset.X / CellSize),
 				FMath::RoundToInt32(ScrollOffset.Y / CellSize));
-			GridScrollOffset = FIntVector2::ZeroValue; // Disable scrolling for now to simplify development
 
 			ENQUEUE_RENDER_COMMAND(ScrollOffset)(
 			[WorldScene = GetWorld()->Scene, GridScrollOffset = GridScrollOffset](FRHICommandListImmediate& RHICmdList)
@@ -135,7 +141,7 @@ void UWaterSubsystem::ScrollWorldGrid()
 					}
 				});
 
-			LastViewLocationInt = ViewLocationInt;
+			LastScrollTargetLocationInt = ScrollTargetLocationInt;
 		}
 	}
 }
