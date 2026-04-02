@@ -38,7 +38,8 @@ FWaterGlobalFlowData UWaterGlobalFlowComponent::GetGlobalFlowData() const
 {
 	FWaterGlobalFlowData Data;
     Data.FlowDirection = FlowDirection.GetSafeNormal();
-	Data.FlowNoiseIntensity = FlowNoiseIntensity;
+	Data.FlowNoiseIntensityMin = FlowNoiseIntensityMin;
+	Data.FlowNoiseIntensityMax = FlowNoiseIntensityMax;
 	Data.FlowNoiseTiling = FlowNoiseTiling;
 
 	if (FlowNoiseTexture && FlowNoiseTexture->GetResource())

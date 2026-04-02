@@ -27,6 +27,15 @@ float CellSize;
 float2 GridOrigin;
 float DeltaTime;
 float AdvectionDamping;
+float FlowNoiseIntensityMin;
+float FlowNoiseIntensityMax;
+float FlowNoiseTiling;
+float2 FlowDirection;
+float4 UVScaleOffset;
+
+SamplerState FlowNoiseSampler;
+Texture2D FlowNoiseTexture;
+
 SamplerState LinearSampler;
 Texture2D CurrentHeightField;
 RWTexture2D<float> NextHeightField;
@@ -68,9 +77,17 @@ void HeightAdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Current state
 	float h = SampleHeight(Coord);
 	float2 vel = SampleVelocity(Coord);
-	
+
 	// UV of current cell center
 	float2 UV = (float2(Coord) + 0.5) / float(GridSize);
+
+	// Add Global Flow
+	float2 GlobalFlowUV = UV * UVScaleOffset.xy + UVScaleOffset.zw;
+	float2 NoiseUV = GlobalFlowUV * FlowNoiseTiling;
+
+	float NoiseSample = FlowNoiseTexture.SampleLevel(FlowNoiseSampler, NoiseUV, 0).r;
+	float2 GlobalFlowVel = FlowDirection * lerp(FlowNoiseIntensityMin, FlowNoiseIntensityMax, NoiseSample);
+	vel += GlobalFlowVel;
 	
 	// Trace backwards in time (convert world velocity to UV displacement)
 	float WorldSize = CellSize * float(GridSize);
@@ -83,6 +100,7 @@ void HeightAdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	NextHeightField[Coord] = newHeight * AdvectionDamping;
 }
 
+// need remove
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
 void VelocityAdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

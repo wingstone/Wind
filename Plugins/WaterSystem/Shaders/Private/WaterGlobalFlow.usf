@@ -12,7 +12,8 @@
 
 uint GridSize;
 float DeltaTime;
-float FlowNoiseIntensity;
+float FlowNoiseIntensityMin;
+float FlowNoiseIntensityMax;
 float FlowNoiseTiling;
 float2 FlowDirection;
 
@@ -32,7 +33,7 @@ void GlobalFlowCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	float NoiseSample = FlowNoiseTexture.SampleLevel(FlowNoiseSampler, NoiseUV, 0).r;
 
-	float2 FlowForce = FlowDirection * NoiseSample * FlowNoiseIntensity * DeltaTime;
+	float2 FlowForce = FlowDirection * lerp(FlowNoiseIntensityMin, FlowNoiseIntensityMax, NoiseSample) * DeltaTime;
 
 	VelocityField[Coord] += FlowForce;
 }

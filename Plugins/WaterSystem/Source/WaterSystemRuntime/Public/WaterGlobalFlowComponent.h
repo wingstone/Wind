@@ -36,8 +36,11 @@ public:
 	FVector2D FlowDirection = FVector2D(1.0, 0.0);
 
 	/** Intensity of noise-driven flow */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Flow", meta = (ClampMin = "0", UIMin = "0", UIMax = "100"))
-	float FlowNoiseIntensity = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Flow", meta = (ClampMin = "0", UIMin = "0", UIMax = "1000"))
+	float FlowNoiseIntensityMin = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Flow", meta = (ClampMin = "0", UIMin = "0", UIMax = "1000"))
+	float FlowNoiseIntensityMax = 1000.0f;
 
 	/** Tiling scale of the noise texture over the simulation domain */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Global Flow", meta = (ClampMin = "0.01", UIMin = "0.01", UIMax = "10"))

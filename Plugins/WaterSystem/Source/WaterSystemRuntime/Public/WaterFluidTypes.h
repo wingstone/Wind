@@ -112,7 +112,8 @@ struct FWaterGlobalFlowData
 {
 	FVector2D FlowDirection = FVector2D(1.0, 0.0);
 	FTextureRHIRef FlowNoiseTextureRHI;
-	float FlowNoiseIntensity = 1.0f;
+	float FlowNoiseIntensityMin = 0.0f;
+	float FlowNoiseIntensityMax = 1.0f;
 	float FlowNoiseTiling = 1.0f;
 };
 

@@ -18,7 +18,7 @@ IMPLEMENT_SCENE_EXTENSION(FWaterFieldSceneExtension);
 
 static TAutoConsoleVariable<bool> CVarShallowWaterAdvection(
 	TEXT("r.ShallowWater.Advection"),
-	false,
+	true,
 	TEXT("Whether open shallow water advection"),
 	ECVF_Scalability | ECVF_RenderThreadSafe
 );
@@ -325,7 +325,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 	if (SceneData->CurrentInteractions.Num() > 0)
 	{
 		FWaterInteractionApplicationCS::FPermutationDomain PermutationVector;
-		PermutationVector.Set< FWaterInteractionApplicationCS::FApplyVelocity >(CVarShallowWaterAdvection.GetValueOnRenderThread());
+		PermutationVector.Set< FWaterInteractionApplicationCS::FApplyVelocity >(false);
 		auto InteractionCS = GlobalShaderMap->GetShader<FWaterInteractionApplicationCS>(PermutationVector);
 		for (const FWaterInteractionData& Interaction : SceneData->CurrentInteractions)
 		{
@@ -358,30 +358,7 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 	}
 	SceneData->CurrentInteractions.Reset();
 
-	// 1.5) Apply global flow force
-	if (SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI && SceneData->CurrentGlobalFlowData.FlowNoiseIntensity > 0.0f)
-	{
-		const TShaderMapRef<FWaterGlobalFlowCS> GlobalFlowCS(GlobalShaderMap);
-		FWaterGlobalFlowCS::FParameters* Parameters = GraphBuilder.AllocParameters<FWaterGlobalFlowCS::FParameters>();
-		Parameters->GridSize = GridSize;
-		Parameters->DeltaTime = Config.TimeStep;
-		Parameters->FlowNoiseIntensity = SceneData->CurrentGlobalFlowData.FlowNoiseIntensity;
-		Parameters->FlowNoiseTiling = SceneData->CurrentGlobalFlowData.FlowNoiseTiling;
-		Parameters->FlowDirection = FVector2f(SceneData->CurrentGlobalFlowData.FlowDirection);
-		Parameters->FlowNoiseTexture = SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI;
-		Parameters->FlowNoiseSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
-		Parameters->VelocityField = GraphBuilder.CreateUAV(VelocityRefs[SceneData->CurrentVelocityIndex]);
-
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("Water.ShallowWater.GlobalFlow"),
-			ERDGPassFlags::Compute,
-			GlobalFlowCS,
-			Parameters,
-			GroupCount);
-	}
-
-	// 2) Semi-Lagrangian advection for height + velocity.
+	// 2) Semi-Lagrangian advection for height.
 	if (CVarShallowWaterAdvection.GetValueOnRenderThread())
 	{
 		for (int32 i = 0; i < Config.SimulationSubsteps; i++)
@@ -394,6 +371,14 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 				Parameters->GridOrigin = GridOrigin;
 				Parameters->DeltaTime = Config.TimeStep;
 				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
+				Parameters->FlowNoiseIntensityMin = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMin;
+				Parameters->FlowNoiseIntensityMax = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMax;
+				Parameters->FlowNoiseTiling = SceneData->CurrentGlobalFlowData.FlowNoiseTiling;
+				Parameters->FlowDirection = FVector2f(SceneData->CurrentGlobalFlowData.FlowDirection);
+				Parameters->UVScaleOffset = FVector4f(1.0f, 1.0f, GridOrigin.X/Config.WorldSize + 0.5f, GridOrigin.Y/Config.WorldSize + 0.5f);
+
+				Parameters->FlowNoiseSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+				Parameters->FlowNoiseTexture = SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI != nullptr ? SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI : GBlackTexture->TextureRHI;
 				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
 				Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
 				Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightRefs[(SceneData->CurrentHeightIndex + 1) % 3]);
@@ -416,6 +401,14 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 				Parameters->GridOrigin = GridOrigin;
 				Parameters->DeltaTime = Config.TimeStep;
 				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
+				Parameters->FlowNoiseIntensityMin = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMin;
+				Parameters->FlowNoiseIntensityMax = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMax;
+				Parameters->FlowNoiseTiling = SceneData->CurrentGlobalFlowData.FlowNoiseTiling;
+				Parameters->FlowDirection = FVector2f(SceneData->CurrentGlobalFlowData.FlowDirection);
+				Parameters->UVScaleOffset = FVector4f(1.0f, 1.0f, GridOrigin.X/Config.WorldSize + 0.5f, GridOrigin.Y/Config.WorldSize + 0.5f);
+
+				Parameters->FlowNoiseSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+				Parameters->FlowNoiseTexture = SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI != nullptr ? SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI : GBlackTexture->TextureRHI;
 				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
 				Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[(SceneData->CurrentHeightIndex + 2) % 3]);
 				Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightRefs[SceneData->CurrentHeightIndex]);
@@ -429,30 +422,8 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread
 					Parameters,
 					GroupCount);
 			}
-
-			{
-				const TShaderMapRef<FSWVelocityAdvectionCS> AdvectionCS(GlobalShaderMap);
-				FSWVelocityAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FSWVelocityAdvectionCS::FParameters>();
-				Parameters->GridSize = GridSize;
-				Parameters->CellSize = CellSize;
-				Parameters->GridOrigin = GridOrigin;
-				Parameters->DeltaTime = Config.TimeStep;
-				Parameters->AdvectionDamping = FMath::Clamp(Config.SW_AdvectionDamping, 0.0f, 1.0f);
-				Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
-				Parameters->CurrentVelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
-				Parameters->NextVelocityField = GraphBuilder.CreateUAV(VelocityRefs[(SceneData->CurrentVelocityIndex + 1) % 3]);
-
-				FComputeShaderUtils::AddPass(
-					GraphBuilder,
-					RDG_EVENT_NAME("Water.ShallowWater.Advection.Velocity"),
-					ERDGPassFlags::Compute,
-					AdvectionCS,
-					Parameters,
-					GroupCount);
-			}
-				
+	
 			SceneData->CurrentHeightIndex = (SceneData->CurrentHeightIndex + 1) % 3;
-			SceneData->CurrentVelocityIndex = (SceneData->CurrentVelocityIndex + 1) % 3;
 		}
 	}
 
@@ -611,13 +582,14 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 	SceneData->CurrentInteractions.Reset();
 
 	// 1.5) Apply global flow force
-	if (SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI && SceneData->CurrentGlobalFlowData.FlowNoiseIntensity > 0.0f)
+	if (SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI)
 	{
 		const TShaderMapRef<FWaterGlobalFlowCS> GlobalFlowCS(GlobalShaderMap);
 		FWaterGlobalFlowCS::FParameters* Parameters = GraphBuilder.AllocParameters<FWaterGlobalFlowCS::FParameters>();
 		Parameters->GridSize = GridSize;
 		Parameters->DeltaTime = Config.TimeStep;
-		Parameters->FlowNoiseIntensity = SceneData->CurrentGlobalFlowData.FlowNoiseIntensity;
+		Parameters->FlowNoiseIntensityMin = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMin;
+		Parameters->FlowNoiseIntensityMax = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMax;
 		Parameters->FlowNoiseTiling = SceneData->CurrentGlobalFlowData.FlowNoiseTiling;
 		Parameters->FlowDirection = FVector2f(SceneData->CurrentGlobalFlowData.FlowDirection);
 		Parameters->FlowNoiseTexture = SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI;
@@ -846,6 +818,13 @@ void FWaterFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuild
 			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->TempHeightFieldRT, TEXT("TempHeightFieldRT"));
 			FRDGTextureRef TempHeightTexture = GraphBuilder.RegisterExternalTexture(SceneData->TempHeightFieldRT, TEXT("Water.TempHeight.InitClear"));
 			AddClearRenderTargetPass(GraphBuilder, TempHeightTexture, FLinearColor::Black);
+		}
+
+		if (!SceneData->TempVelocityFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->TempVelocityFieldRT, TEXT("TempVelocityFieldRT"));
+			FRDGTextureRef TempVelocityTexture = GraphBuilder.RegisterExternalTexture(SceneData->TempVelocityFieldRT, TEXT("Water.TempVelocity.InitClear"));
+			AddClearRenderTargetPass(GraphBuilder, TempVelocityTexture, FLinearColor::Black);
 		}
 
 		if (!SceneData->NormalFieldRT)
