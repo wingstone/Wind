@@ -116,6 +116,12 @@ void FWaterFieldSceneExtension::SetInteractionsToApply_RenderThread(const TArray
 	CurrentInteractions.Append(InteractionsToApply);
 }
 
+void FWaterFieldSceneExtension::SetGlobalFlowData_RenderThread(const FWaterGlobalFlowData& InFlowData)
+{
+	check(IsInRenderingThread());
+	CurrentGlobalFlowData = InFlowData;
+}
+
 void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate& RHICmdList)
 {
 	check(IsInRenderingThread());
@@ -144,6 +150,7 @@ void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate
 	TempPressureFieldRT.SafeRelease();
 	DivergenceFieldRT.SafeRelease();
 	VorticityFieldRT.SafeRelease();
+	CurrentGlobalFlowData = FWaterGlobalFlowData();
 }
 
 // ============================================================================

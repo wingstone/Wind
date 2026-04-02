@@ -11,6 +11,7 @@
 class FWaterFieldSceneExtension;
 class UWaterInteractionComponent;
 class UWaterFluidConfigComponent;
+class UWaterGlobalFlowComponent;
 class UWaterSystemSettings;
 
 /**
@@ -46,6 +47,9 @@ public:
 
 	void RegisterFluidConfigComponent(UWaterFluidConfigComponent* Component);
 	void UnregisterFluidConfigComponent(UWaterFluidConfigComponent* Component);
+
+	void RegisterGlobalFlowComponent(UWaterGlobalFlowComponent* Component);
+	void UnregisterGlobalFlowComponent(UWaterGlobalFlowComponent* Component);
 	
 	FWaterFieldSceneExtension* GetSceneExtension() const;
 	
@@ -55,6 +59,8 @@ private:
 	TArray<TObjectPtr<UWaterInteractionComponent>> RegisteredInteractionComponents;
 	UPROPERTY()
 	TArray<TObjectPtr<UWaterFluidConfigComponent>> RegisteredFluidConfigComponents;
+	UPROPERTY()
+	TArray<TObjectPtr<UWaterGlobalFlowComponent>> RegisteredGlobalFlowComponents;
 
 	FIntVector2 LastScrollTargetLocationInt = FIntVector2::ZeroValue;
 	
@@ -65,4 +71,7 @@ private:
 
 	/** Send interaction to render thread */
 	void UpdateInteractions();
+
+	/** Send global flow data to render thread */
+	void UpdateGlobalFlow();
 };

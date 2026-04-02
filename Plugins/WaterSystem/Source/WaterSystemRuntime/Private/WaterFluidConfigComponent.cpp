@@ -33,17 +33,12 @@ void UWaterFluidConfigComponent::PostEditChangeProperty(FPropertyChangedEvent& P
 }
 #endif
 
-
 void UWaterFluidConfigComponent::RegisterWithSubsystem()
 {
 	if (UWaterSubsystem* WaterSys = GetWaterSubsystem())
 	{
 		WaterSys->RegisterFluidConfigComponent(this);
-	}
-
-	if (GetWaterSubsystem())
-	{
-		GetWaterSubsystem()->ResetState();
+		 WaterSys->ResetState();
 	}
 }
 

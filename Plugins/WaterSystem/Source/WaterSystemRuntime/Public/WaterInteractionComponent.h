@@ -47,6 +47,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
 	float Width = 0.0f; // Only used for ring shape
 
+	/** Whether to use a custom interaction direction */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	bool bCustomDirection = false;
+
+	/** Custom interaction direction in world space, used when bCustomDirection is true */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (EditCondition = "bCustomDirection"))
+	FVector2D CustomDirection = FVector2D(1.0, 0.0);
+
+	/** Whether to use component velocity for interaction force calculation */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	bool bUseComponentVelocity = true;
+
 	/** Interaction direction strength paramter */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
 	float DirectionalStrength = 1.0f; // Only used for directional emission

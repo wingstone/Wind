@@ -5,6 +5,7 @@
 #include "WaterFieldSceneExtension.h"
 #include "WaterInteractionComponent.h"
 #include "WaterFluidConfigComponent.h"
+#include "WaterGlobalFlowComponent.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "SceneInterface.h"
@@ -82,6 +83,16 @@ void UWaterSubsystem::UnregisterFluidConfigComponent(UWaterFluidConfigComponent*
 	RegisteredFluidConfigComponents.Remove(Component);
 }
 
+void UWaterSubsystem::RegisterGlobalFlowComponent(UWaterGlobalFlowComponent* Component)
+{
+	RegisteredGlobalFlowComponents.AddUnique(Component);
+}
+
+void UWaterSubsystem::UnregisterGlobalFlowComponent(UWaterGlobalFlowComponent* Component)
+{
+	RegisteredGlobalFlowComponents.Remove(Component);
+}
+
 void UWaterSubsystem::ScrollWorldGrid()
 {
 	// Prefer the player pawn location so the simulation follows gameplay position.
@@ -156,6 +167,7 @@ void UWaterSubsystem::UpdateFluidConfig()
 			// For now just take the first registered config component, we can blend them later if needed
 			ApplyFluidConfig = RegisteredFluidConfigComponents[0]->GetFluidConfig();
 		}
+
 		ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
 		[WorldScene = GetWorld()->Scene, FluidConfig = ApplyFluidConfig](FRHICommandListImmediate& RHICmdList)
 			{
@@ -206,6 +218,37 @@ void UWaterSubsystem::UpdateInteractions()
 	}
 }
 
+void UWaterSubsystem::UpdateGlobalFlow()
+{
+	if (!GetWorld() || !GetWorld()->Scene || RegisteredGlobalFlowComponents.Num() == 0)
+	{
+		return;
+	}
+
+	// Collect the first active global flow component
+	FWaterGlobalFlowData FlowData;
+	for (UWaterGlobalFlowComponent* Component : RegisteredGlobalFlowComponents)
+	{
+		if (Component && Component->IsFlowEnabled())
+		{
+			FlowData = Component->GetGlobalFlowData();
+			break;
+		}
+	}
+
+	ENQUEUE_RENDER_COMMAND(UpdateGlobalFlow)(
+	[WorldScene = GetWorld()->Scene, FlowData = MoveTemp(FlowData)](FRHICommandListImmediate& RHICmdList)
+		{
+			if (WorldScene->GetRenderScene())
+			{
+				if (FWaterFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FWaterFieldSceneExtension>())
+				{
+					SceneExtension->SetGlobalFlowData_RenderThread(FlowData);
+				}
+			}
+		});
+}
+
 
 void UWaterSubsystem::ResetState()
 {
@@ -225,5 +268,6 @@ void UWaterSubsystem::ResetState()
 			});
 
 		UpdateFluidConfig();
+		UpdateGlobalFlow();
 	}
 }

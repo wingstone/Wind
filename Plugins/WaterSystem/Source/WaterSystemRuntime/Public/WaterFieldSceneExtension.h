@@ -78,6 +78,7 @@ public:
 	void SetConfig_RenderThread(const FWaterFluidConfig& NewConfig);
 	void SetScrollOffset_RenderThread(const FIntVector2& NewGridScrollOffset);
 	void SetInteractionsToApply_RenderThread(const TArray<FWaterInteractionData>& InteractionsToApply);
+	void SetGlobalFlowData_RenderThread(const FWaterGlobalFlowData& InFlowData);
 	void ResetState_RenderThread(FRHICommandListImmediate& RHICmdList);
 
 private:
@@ -98,6 +99,7 @@ private:
 	// --- Current frame data (render thread) ---
 	TArray<FWaterInteractionData> CurrentInteractions;
 	FWaterFluidConfig CurrentConfig;
+	FWaterGlobalFlowData CurrentGlobalFlowData;
 	FVector2f WorldGridCenter;
 	FIntVector2 GridScrollOffset;
 

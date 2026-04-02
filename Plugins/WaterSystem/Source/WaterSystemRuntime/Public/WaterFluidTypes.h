@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "RHIResources.h"
 #include "WaterFluidTypes.generated.h"
 
 /**
@@ -100,6 +101,15 @@ struct FWaterFluidConfig
 	/** Only used for shallow water solver, controls wave diffusion */ 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float SW_DiffusionBeta = 0.95f;
+};
+
+/** Render-thread-safe snapshot of global flow data (produced by UWaterGlobalFlowComponent) */
+struct FWaterGlobalFlowData
+{
+	FVector2D FlowDirection = FVector2D(1.0, 0.0);
+	FTextureRHIRef FlowNoiseTextureRHI;
+	float FlowNoiseIntensity = 1.0f;
+	float FlowNoiseTiling = 1.0f;
 };
 
 /** Player/object interaction data */
