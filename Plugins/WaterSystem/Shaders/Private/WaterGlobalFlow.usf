@@ -1,0 +1,38 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	WaterGlobalFlow.usf: Apply global flow force from noise texture
+=============================================================================*/
+
+#include "/Engine/Private/Common.ush"
+
+#if !defined(THREAD_GROUP_SIZE)
+#define THREAD_GROUP_SIZE 16
+#endif
+
+uint GridSize;
+float DeltaTime;
+float FlowNoiseIntensity;
+float FlowNoiseTiling;
+float2 FlowDirection;
+
+Texture2D FlowNoiseTexture;
+SamplerState FlowNoiseSampler;
+RWTexture2D<float2> VelocityField;
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void GlobalFlowCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	if ((uint)Coord.x >= GridSize || (uint)Coord.y >= GridSize)
+		return;
+
+	float2 UV = (float2(Coord) + 0.5f) / float(GridSize);
+	float2 NoiseUV = UV * FlowNoiseTiling;
+
+	float NoiseSample = FlowNoiseTexture.SampleLevel(FlowNoiseSampler, NoiseUV, 0).r;
+
+	float2 FlowForce = FlowDirection * NoiseSample * FlowNoiseIntensity * DeltaTime;
+
+	VelocityField[Coord] += FlowForce;
+}

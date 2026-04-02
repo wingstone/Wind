@@ -66,16 +66,16 @@ void UWaterInteractionComponent::UpdateInteraction(float DeltaTime)
 	if (bIsSubmerged)
 	{
 		FVector2D Velocity2D(CurrentVelocity.X, CurrentVelocity.Y);
-		float ComponentVelocity = Velocity2D.Size();
+		float NewComponentVelocity = Velocity2D.Size();
 
-		if (ComponentVelocity > MinSpeedForInteraction) // Minimum speed to generate waves
+		if (NewComponentVelocity > MinSpeedForInteraction) // Minimum speed to generate waves
 		{
 			bIsInteractionUseful = true;
 
 			CurrentInteractionData.Position = FVector2D(CurrentPosition.X, CurrentPosition.Y);
 			CurrentInteractionData.ForceDirection = bCustomDirection ? CustomDirection.GetSafeNormal() : Velocity2D.GetSafeNormal();
 			CurrentInteractionData.RadiusParameter = FVector2D(Radius, Width);
-			float DirectionalStrengthFactor = bUseComponentVelocity ? ComponentVelocity : 1.0f;
+			float DirectionalStrengthFactor = bUseComponentVelocity ? NewComponentVelocity : 1.0f;
 			CurrentInteractionData.StrengthParameter = FVector(DirectionalStrength * DirectionalStrengthFactor, OmniStrength, VortexStrength);
 			CurrentInteractionData.HeightIntensity = HeightIntensity;
 			CurrentInteractionData.PowerFalloff = PowerFalloff;

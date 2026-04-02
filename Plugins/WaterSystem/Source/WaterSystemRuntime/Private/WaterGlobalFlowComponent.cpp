@@ -24,7 +24,7 @@ void UWaterGlobalFlowComponent::EndPlay(const EEndPlayReason::Type EndPlayReason
 }
 
 #if WITH_EDITOR
-void UWaterFluidConfigComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+void UWaterGlobalFlowComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	if (GetWaterSubsystem())
