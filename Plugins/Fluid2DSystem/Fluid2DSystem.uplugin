@@ -1,0 +1,28 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Fluid2D System",
+	"Description": "2D fluid simulation system for water-player interaction, using GPU-accelerated shallow water equations",
+	"Category": "Physics",
+	"CreatedBy": "",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "Fluid2DSystemRuntime",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit"
+		},
+		{
+			"Name": "Fluid2DSystemEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}

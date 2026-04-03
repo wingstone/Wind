@@ -1,0 +1,95 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	Fluid2DInteractionApplication.usf: Apply player/object interaction forces
+=============================================================================*/
+
+#include "/Engine/Private/Common.ush"
+
+#if !defined(THREAD_GROUP_SIZE)
+#define THREAD_GROUP_SIZE 16
+#endif
+
+#if !defined(APPLY_VELOCITY)
+#define APPLY_VELOCITY 0
+#endif
+
+int GridSize;
+float CellSize;
+float2 GridOrigin;
+float InteractionDirectionalStrength;
+float InteractionOmniStrength;
+float InteractionVortexStrength;
+float InteractionRadius;
+float InteractionRadiusWidth;
+float InteractionPowerFalloff;
+float InteractionHeightIntensity;
+int InteractionShapeType;
+int InteractionEmissionTypeMask;
+float2 InteractionPosition;
+float2 InteractionDirection;
+RWTexture2D<float> HeightField;
+RWTexture2D<float2> VelocityField;
+
+float2 GridToWorld(int2 Coord)
+{
+	return Coord * CellSize + GridOrigin;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+
+	float Falloff = 0.0f;
+	if (InteractionShapeType == 1) // Disk
+	{
+		float2 WorldPos = GridToWorld(Coord);
+		float Distance = length(WorldPos - InteractionPosition);
+		if (Distance < InteractionRadius)
+		{
+			Falloff = pow(Distance / InteractionRadius, InteractionPowerFalloff);
+		}
+	}
+	else if (InteractionShapeType == 2) // Ring
+	{
+		float2 WorldPos = GridToWorld(Coord);
+		float DistanceToCenter = length(WorldPos - InteractionPosition);
+		if (DistanceToCenter < InteractionRadius + InteractionRadiusWidth
+			&& DistanceToCenter > InteractionRadius - InteractionRadiusWidth)
+		{
+			float OutDistance = DistanceToCenter - InteractionRadius;
+			float InDistance = InteractionRadius - DistanceToCenter;
+			float Distance = max(OutDistance, InDistance);
+			Falloff = pow(Distance / InteractionRadius, InteractionPowerFalloff);
+		}
+	}
+
+	float Height = InteractionHeightIntensity * Falloff;
+	HeightField[Coord] += Height;
+
+#if APPLY_VELOCITY
+	float2 Velocity = 0.0f;
+	if (InteractionEmissionTypeMask & 0x1) // Directional
+	{
+		Velocity += InteractionDirection * InteractionDirectionalStrength * Falloff;
+	}
+	if (InteractionEmissionTypeMask & 0x2) // Omni
+	{
+		float2 OmniDirection = GridToWorld(Coord) - InteractionPosition;
+		OmniDirection = normalize(OmniDirection);
+		Velocity += OmniDirection * InteractionOmniStrength * Falloff;
+	}
+	if (InteractionEmissionTypeMask & 0x4) // Vortex
+	{
+		float2 ToCenter = InteractionPosition - GridToWorld(Coord);
+		float2 TangentialDir = float2(-ToCenter.y, ToCenter.x);
+		TangentialDir = normalize(TangentialDir);
+		Velocity += TangentialDir * InteractionVortexStrength * Falloff;
+	}
+	VelocityField[Coord] += Velocity;
+#endif
+}
