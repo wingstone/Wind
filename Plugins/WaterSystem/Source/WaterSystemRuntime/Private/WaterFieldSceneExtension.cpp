@@ -157,6 +157,7 @@ void FWaterFieldSceneExtension::ResetState_RenderThread(FRHICommandListImmediate
 	TempPressureFieldRT.SafeRelease();
 	DivergenceFieldRT.SafeRelease();
 	VorticityFieldRT.SafeRelease();
+	OutputVelocityFieldRT.SafeRelease();
 	CurrentGlobalFlowData = FWaterGlobalFlowData();
 }
 
@@ -209,7 +210,7 @@ void FWaterFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder& 
 
 		for (uint32 i = 0; i < 3; i++)
 		{
-			if (!SceneData->HeightFieldRT[i]) continue;
+			if (!SceneData->HeightFieldRT[i] || !SceneData->TempHeightFieldRT) continue;
 
 			FRDGTextureRef Source = GraphBuilder.RegisterExternalTexture(SceneData->HeightFieldRT[i]);
 			FRDGTextureRef Dest = GraphBuilder.RegisterExternalTexture(SceneData->TempHeightFieldRT);
@@ -240,7 +241,7 @@ void FWaterFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder& 
 
 		for (uint32 i = 0; i < 3; i++)
 		{
-			if (!SceneData->VelocityFieldRT[i]) continue;
+			if (!SceneData->VelocityFieldRT[i] || !SceneData->TempVelocityFieldRT) continue;
 
 			FRDGTextureRef Source = GraphBuilder.RegisterExternalTexture(SceneData->VelocityFieldRT[i]);
 			FRDGTextureRef Dest = GraphBuilder.RegisterExternalTexture(SceneData->TempVelocityFieldRT);
@@ -526,6 +527,13 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 		Parameters->DeltaTime = Config.TimeStep;
 		Parameters->CellSize = CellSize;
 		Parameters->Damping = FMath::Clamp(Config.NS_Damping, 0.0f, 1.0f);
+		Parameters->FlowNoiseIntensityMin = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMin;
+		Parameters->FlowNoiseIntensityMax = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMax;
+		Parameters->FlowNoiseTiling = SceneData->CurrentGlobalFlowData.FlowNoiseTiling;
+		Parameters->FlowDirection = FVector2f(SceneData->CurrentGlobalFlowData.FlowDirection);
+		Parameters->UVScaleOffset = FVector4f(1.0f, 1.0f, GridOrigin.X/Config.WorldSize + 0.5f, GridOrigin.Y/Config.WorldSize + 0.5f);
+		Parameters->FlowNoiseSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+		Parameters->FlowNoiseTexture = SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI != nullptr ? SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI : GBlackTexture->TextureRHI;
 		Parameters->LinearSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 		Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
 		Parameters->OutVelocityField = GraphBuilder.CreateUAV(VelocityRefs[(SceneData->CurrentVelocityIndex + 1) % 3]);
@@ -580,30 +588,6 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 		}
 	}
 	SceneData->CurrentInteractions.Reset();
-
-	// 1.5) Apply global flow force
-	if (SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI)
-	{
-		const TShaderMapRef<FWaterGlobalFlowCS> GlobalFlowCS(GlobalShaderMap);
-		FWaterGlobalFlowCS::FParameters* Parameters = GraphBuilder.AllocParameters<FWaterGlobalFlowCS::FParameters>();
-		Parameters->GridSize = GridSize;
-		Parameters->DeltaTime = Config.TimeStep;
-		Parameters->FlowNoiseIntensityMin = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMin;
-		Parameters->FlowNoiseIntensityMax = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMax;
-		Parameters->FlowNoiseTiling = SceneData->CurrentGlobalFlowData.FlowNoiseTiling;
-		Parameters->FlowDirection = FVector2f(SceneData->CurrentGlobalFlowData.FlowDirection);
-		Parameters->FlowNoiseTexture = SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI;
-		Parameters->FlowNoiseSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
-		Parameters->VelocityField = GraphBuilder.CreateUAV(VelocityRefs[SceneData->CurrentVelocityIndex]);
-
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("Water.NS.GlobalFlow"),
-			ERDGPassFlags::Compute,
-			GlobalFlowCS,
-			Parameters,
-			GroupCount);
-	}
 
 	// 2) Vorticity Confinement (GPU Gems): restore small-scale rotational detail
 	//      Step A: compute scalar vorticity ω = curl(u)
@@ -779,6 +763,40 @@ void FWaterFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread
 			GroupCount);
 			
 		SceneData->CurrentVelocityIndex = (SceneData->CurrentVelocityIndex + 1) % 3;
+	}
+
+	// 6) Compose output: simulation velocity + global flow noise → OutputVelocityFieldRT
+	{
+		if (!SceneData->OutputVelocityFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(FIntPoint(GridSize, GridSize), EPixelFormat::PF_G16R16F), SceneData->OutputVelocityFieldRT, TEXT("OutputVelocityFieldRT"));
+			FRDGTextureRef OutputVelTexture = GraphBuilder.RegisterExternalTexture(SceneData->OutputVelocityFieldRT, TEXT("Water.OutputVelocity.InitClear"));
+			AddClearRenderTargetPass(GraphBuilder, OutputVelTexture, FLinearColor::Black);
+		}
+		FRDGTextureRef OutputVelocityRef = GraphBuilder.RegisterExternalTexture(SceneData->OutputVelocityFieldRT);
+
+		const TShaderMapRef<FWaterComposeVelocityCS> ComposeCS(GlobalShaderMap);
+		FWaterComposeVelocityCS::FParameters* Parameters = GraphBuilder.AllocParameters<FWaterComposeVelocityCS::FParameters>();
+		Parameters->GridSize = GridSize;
+		Parameters->FlowNoiseIntensityMin = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMin;
+		Parameters->FlowNoiseIntensityMax = SceneData->CurrentGlobalFlowData.FlowNoiseIntensityMax;
+		Parameters->FlowNoiseTiling = SceneData->CurrentGlobalFlowData.FlowNoiseTiling;
+		Parameters->FlowDirection = FVector2f(SceneData->CurrentGlobalFlowData.FlowDirection);
+		Parameters->UVScaleOffset = FVector4f(1.0f, 1.0f, GridOrigin.X/Config.WorldSize + 0.5f, GridOrigin.Y/Config.WorldSize + 0.5f);
+		Parameters->FlowNoiseSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+		Parameters->FlowNoiseTexture = SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI != nullptr ? SceneData->CurrentGlobalFlowData.FlowNoiseTextureRHI : GBlackTexture->TextureRHI;
+		Parameters->SourceVelocityField = GraphBuilder.CreateSRV(VelocityRefs[SceneData->CurrentVelocityIndex]);
+		Parameters->OutVelocityField = GraphBuilder.CreateUAV(OutputVelocityRef);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Water.NS.ComposeOutputVelocity"),
+			ERDGPassFlags::Compute,
+			ComposeCS,
+			Parameters,
+			GroupCount);
+
+		GraphBuilder.UseExternalAccessMode(OutputVelocityRef, ERHIAccess::SRVMask, ERHIPipeline::All);
 	}
 
 	// 将SceneData->VelocityFieldRT[i]和SceneData->HeightFieldRT[i]设为全局srv
@@ -976,7 +994,11 @@ void FWaterFieldSceneExtension::FRenderer::UpdateSceneUniformBuffer(FRDGBuilder&
 	}
 	Parameters.WaterHeightMapTextureSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 
-	if (SceneData->VelocityFieldRT[SceneData->CurrentVelocityIndex])
+	if (SceneData->OutputVelocityFieldRT)
+	{
+		Parameters.WaterVelocityMapTexture = GraphBuilder.CreateSRV(GraphBuilder.RegisterExternalTexture(SceneData->OutputVelocityFieldRT, TEXT("Water.OutputVelocity.Current")));
+	}
+	else if (SceneData->VelocityFieldRT[SceneData->CurrentVelocityIndex])
 	{
 		Parameters.WaterVelocityMapTexture = GraphBuilder.CreateSRV(GraphBuilder.RegisterExternalTexture(SceneData->VelocityFieldRT[SceneData->CurrentVelocityIndex], TEXT("Water.Velocity.Current")));
 	}

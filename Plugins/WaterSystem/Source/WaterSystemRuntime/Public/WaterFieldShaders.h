@@ -250,6 +250,13 @@ class FNSAdvectionCS : public FGlobalShader
 		SHADER_PARAMETER(float, DeltaTime)
 		SHADER_PARAMETER(float, CellSize)
 		SHADER_PARAMETER(float, Damping)
+		SHADER_PARAMETER(float, FlowNoiseIntensityMin)
+		SHADER_PARAMETER(float, FlowNoiseIntensityMax)
+		SHADER_PARAMETER(float, FlowNoiseTiling)
+		SHADER_PARAMETER(FVector2f, FlowDirection)
+		SHADER_PARAMETER(FVector4f, UVScaleOffset)
+		SHADER_PARAMETER_SAMPLER(SamplerState, FlowNoiseSampler)
+		SHADER_PARAMETER_TEXTURE(Texture2D, FlowNoiseTexture)
 		SHADER_PARAMETER_SAMPLER(SamplerState, LinearSampler)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, VelocityField)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, DensityField)
@@ -462,6 +469,39 @@ class FWaterGlobalFlowCS : public FGlobalShader
 		SHADER_PARAMETER_TEXTURE(Texture2D, FlowNoiseTexture)
 		SHADER_PARAMETER_SAMPLER(SamplerState, FlowNoiseSampler)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, VelocityField)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};
+
+/**
+ * Compose final velocity output: simulation velocity + global flow noise
+ */
+class FWaterComposeVelocityCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FWaterComposeVelocityCS);
+	SHADER_USE_PARAMETER_STRUCT(FWaterComposeVelocityCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(uint32, GridSize)
+		SHADER_PARAMETER(float, FlowNoiseIntensityMin)
+		SHADER_PARAMETER(float, FlowNoiseIntensityMax)
+		SHADER_PARAMETER(float, FlowNoiseTiling)
+		SHADER_PARAMETER(FVector2f, FlowDirection)
+		SHADER_PARAMETER(FVector4f, UVScaleOffset)
+		SHADER_PARAMETER_TEXTURE(Texture2D, FlowNoiseTexture)
+		SHADER_PARAMETER_SAMPLER(SamplerState, FlowNoiseSampler)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, SourceVelocityField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVelocityField)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)

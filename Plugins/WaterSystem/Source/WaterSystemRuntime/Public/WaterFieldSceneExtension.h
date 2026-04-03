@@ -95,6 +95,7 @@ private:
 	TRefCountPtr<IPooledRenderTarget> TempPressureFieldRT;
 	TRefCountPtr<IPooledRenderTarget> DivergenceFieldRT;
 	TRefCountPtr<IPooledRenderTarget> VorticityFieldRT;
+	TRefCountPtr<IPooledRenderTarget> OutputVelocityFieldRT;
 
 	// --- Current frame data (render thread) ---
 	TArray<FWaterInteractionData> CurrentInteractions;

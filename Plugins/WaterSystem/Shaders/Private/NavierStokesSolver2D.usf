@@ -39,6 +39,15 @@ Texture2D OriginalDensityField;
 Texture2D VorticityField;
 SamplerState LinearSampler;
 
+// Global flow noise
+float FlowNoiseIntensityMin;
+float FlowNoiseIntensityMax;
+float FlowNoiseTiling;
+float2 FlowDirection;
+float4 UVScaleOffset;
+SamplerState FlowNoiseSampler;
+Texture2D FlowNoiseTexture;
+
 // Vorticity confinement
 float VorticityEpsilon;
 
@@ -70,6 +79,18 @@ float LoadPressure(int2 Coord)
 }
 
 //=============================================================================
+// Global flow noise helper
+//=============================================================================
+float2 GetGlobalFlowVelocity(int2 Coord)
+{
+	float2 UV = (float2(Coord) + 0.5) / float(GridSize);
+	float2 GlobalFlowUV = UV * UVScaleOffset.xy + UVScaleOffset.zw;
+	float2 NoiseUV = GlobalFlowUV * FlowNoiseTiling;
+	float NoiseSample = FlowNoiseTexture.SampleLevel(FlowNoiseSampler, NoiseUV, 0).r;
+	return FlowDirection * lerp(FlowNoiseIntensityMin, FlowNoiseIntensityMax, NoiseSample);
+}
+
+//=============================================================================
 // Step 1: Advection (Semi-Lagrangian with bilinear sampling)
 //=============================================================================
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
@@ -81,6 +102,9 @@ void AdvectionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		return;
 
 	float2 Vel = LoadVelocity(Coord);
+
+	// Add global flow noise contribution
+	Vel += GetGlobalFlowVelocity(Coord);
 
 	// UV of current cell center
 	float2 UV = (float2(Coord) + 0.5) / float(GridSize);

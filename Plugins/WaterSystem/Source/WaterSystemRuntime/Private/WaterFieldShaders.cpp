@@ -27,3 +27,4 @@ IMPLEMENT_GLOBAL_SHADER(FNSVorticityConfinementCS, "/Plugin/WaterSystem/Private/
 
 // Global Flow
 IMPLEMENT_GLOBAL_SHADER(FWaterGlobalFlowCS, "/Plugin/WaterSystem/Private/WaterGlobalFlow.usf", "GlobalFlowCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FWaterComposeVelocityCS, "/Plugin/WaterSystem/Private/WaterGlobalFlow.usf", "ComposeVelocityCS", SF_Compute);

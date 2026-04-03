@@ -16,10 +16,14 @@ float FlowNoiseIntensityMin;
 float FlowNoiseIntensityMax;
 float FlowNoiseTiling;
 float2 FlowDirection;
+float4 UVScaleOffset;
 
 Texture2D FlowNoiseTexture;
 SamplerState FlowNoiseSampler;
 RWTexture2D<float2> VelocityField;
+
+Texture2D SourceVelocityField;
+RWTexture2D<float2> OutVelocityField;
 
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
 void GlobalFlowCS(uint3 DispatchThreadId : SV_DispatchThreadID)
@@ -36,4 +40,23 @@ void GlobalFlowCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float2 FlowForce = FlowDirection * lerp(FlowNoiseIntensityMin, FlowNoiseIntensityMax, NoiseSample) * DeltaTime;
 
 	VelocityField[Coord] += FlowForce;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void ComposeVelocityCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	if ((uint)Coord.x >= GridSize || (uint)Coord.y >= GridSize)
+		return;
+
+	float2 SimVel = SourceVelocityField.Load(int3(Coord, 0)).xy;
+
+	// Sample flow noise
+	float2 UV = (float2(Coord) + 0.5f) / float(GridSize);
+	float2 GlobalFlowUV = UV * UVScaleOffset.xy + UVScaleOffset.zw;
+	float2 NoiseUV = GlobalFlowUV * FlowNoiseTiling;
+	float NoiseSample = FlowNoiseTexture.SampleLevel(FlowNoiseSampler, NoiseUV, 0).r;
+	float2 FlowVel = FlowDirection * lerp(FlowNoiseIntensityMin, FlowNoiseIntensityMax, NoiseSample);
+
+	OutVelocityField[Coord] = SimVel + FlowVel;
 }
