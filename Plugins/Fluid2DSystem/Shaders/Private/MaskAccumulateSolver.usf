@@ -1,0 +1,37 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+/*=============================================================================
+	MaskAccumulateSolver.usf: 2D Mask Accumulation Solver for special effects like murky water
+=============================================================================*/
+
+#include "/Engine/Private/Common.ush"
+
+#if !defined(THREAD_GROUP_SIZE)
+#define THREAD_GROUP_SIZE 16
+#endif
+
+uint GridSize;
+float FadeFactor;
+Texture2D CurrentHeightField;
+RWTexture2D<float> NextHeightField;
+
+// Sample height field with boundary conditions
+float SampleHeight(int2 Coord)
+{
+	return CurrentHeightField[Coord].x;
+}
+
+[numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
+void MaskAccumulateCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 Coord = int2(DispatchThreadId.xy);
+	
+	// Boundary check
+	if (Coord.x >= GridSize || Coord.y >= GridSize)
+		return;
+	
+	// Current state
+	float h = SampleHeight(Coord);
+
+	// Write output
+	NextHeightField[Coord] = saturate(h * FadeFactor);
+}

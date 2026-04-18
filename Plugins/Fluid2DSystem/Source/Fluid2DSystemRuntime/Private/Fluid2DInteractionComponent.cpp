@@ -68,7 +68,7 @@ void UFluid2DInteractionComponent::UpdateInteraction(float DeltaTime)
 		FVector2D Velocity2D(CurrentVelocity.X, CurrentVelocity.Y);
 		float NewComponentVelocity = Velocity2D.Size();
 
-		if (NewComponentVelocity > MinSpeedForInteraction) // Minimum speed to generate waves
+		if (!bUseComponentVelocity || bUseComponentVelocity && NewComponentVelocity > MinSpeedForInteraction)
 		{
 			bIsInteractionUseful = true;
 

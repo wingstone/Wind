@@ -1,12 +1,12 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "WindFieldPointComponent.h"
+#include "WindFieldVortexComponent.h"
 
-UWindFieldPointComponent::UWindFieldPointComponent()
+UWindFieldVortexComponent::UWindFieldVortexComponent()
 {
 }
 
-FGPUWindSourceData UWindFieldPointComponent::ToGPUData() const
+FGPUWindSourceData UWindFieldVortexComponent::ToGPUData() const
 {
 	FGPUWindSourceData Data = {};
 	Data.Position = FVector3f(GetComponentLocation());

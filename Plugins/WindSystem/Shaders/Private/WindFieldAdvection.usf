@@ -1,0 +1,120 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+//
+// WindFieldAdvection.usf — Semi-Lagrangian advection pass.
+//
+// Traces backwards along the previous frame's velocity field to transport
+// wind downstream. Directional wind is added to the backtrace velocity as
+// an additive advection term (like Fluid2D global flow), so it drives
+// transport without being stored in the simulation field itself.
+//
+// Input:  PrevField (previous frame's wind field)
+// Output: Advected wind field with dissipation applied
+
+#include "/Engine/Private/Common.ush"
+#include "WindFieldCommon.ush"
+
+// ============================================================================
+// Parameters
+// ============================================================================
+
+float3 FieldOrigin;
+float  Time;
+float3 FieldExtent;
+float  Dissipation;
+uint   ResolutionX;
+uint   ResolutionY;
+uint   ResolutionZ;
+float  DeltaTime;
+float3 PrevFieldOrigin;
+float  Padding0;
+
+Texture3D<float4> PrevField;
+SamplerState PrevFieldSampler;
+
+RWTexture3D<float4> OutputField;
+
+// Directional wind (additive advection velocity)
+float3 DirectionalWindDirection;
+float  DirectionalWindStrength;
+float  DirectionalNoiseStrength;
+uint   bHasDirectionalWind;
+float  Padding1;
+
+Texture2D DirectionalNoiseTexture;
+SamplerState DirectionalNoiseSampler;
+float  DirNoiseTiling;
+float  DirNoiseIntensityMin;
+float  DirNoiseIntensityMax;
+float  DirNoiseScrollSpeed;
+uint   bHasDirectionalNoise;
+float  Padding2;
+
+// ============================================================================
+// Directional wind velocity at a world position
+// ============================================================================
+float3 GetDirectionalWindVelocity(float3 WorldPos)
+{
+	if (bHasDirectionalWind == 0)
+		return float3(0, 0, 0);
+
+	float3 DirWind = DirectionalWindDirection * DirectionalWindStrength;
+
+	// Noise texture spatial modulation
+	if (bHasDirectionalNoise > 0)
+	{
+		float2 NoiseUV = WorldPos.xy * DirNoiseTiling 
+		               + DirectionalWindDirection.xy * DirNoiseScrollSpeed * Time;
+		float NoiseSample = DirectionalNoiseTexture.SampleLevel(DirectionalNoiseSampler, NoiseUV, 0).r;
+		float Modulation = lerp(DirNoiseIntensityMin, DirNoiseIntensityMax, NoiseSample);
+		DirWind *= Modulation * DirectionalNoiseStrength;
+	}
+
+	return DirWind;
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 8
+#endif
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, THREADGROUP_SIZE)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (DispatchThreadId.x >= ResolutionX ||
+	    DispatchThreadId.y >= ResolutionY ||
+	    DispatchThreadId.z >= ResolutionZ)
+	{
+		return;
+	}
+
+	float3 Resolution = float3(ResolutionX, ResolutionY, ResolutionZ);
+	float3 UVW = (float3(DispatchThreadId) + 0.5) / Resolution;
+	float3 WorldPos = FieldOrigin + UVW * FieldExtent;
+
+	float4 Result = float4(0, 0, 0, 0);
+
+	if (DeltaTime > 0.0)
+	{
+		// Sample previous velocity at current position
+		float3 PrevUVW = saturate((WorldPos - PrevFieldOrigin) / max(FieldExtent, 0.001));
+		float3 PrevVelocity = PrevField.SampleLevel(PrevFieldSampler, PrevUVW, 0).xyz;
+
+		// Add directional wind as advection velocity (drives transport)
+		PrevVelocity += GetDirectionalWindVelocity(WorldPos);
+
+		// Backtrace: find where this fluid element came from
+		float3 BacktracePos = WorldPos - PrevVelocity * DeltaTime;
+		float3 BacktraceUVW = saturate((BacktracePos - PrevFieldOrigin) / max(FieldExtent, 0.001));
+
+		// Sample advected velocity with trilinear interpolation
+		Result = PrevField.SampleLevel(PrevFieldSampler, BacktraceUVW, 0);
+
+		// Apply dissipation
+		Result *= Dissipation;
+	}
+
+	OutputField[DispatchThreadId] = Result;
+}

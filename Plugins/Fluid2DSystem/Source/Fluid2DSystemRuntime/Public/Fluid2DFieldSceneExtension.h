@@ -42,6 +42,7 @@ public:
 
 		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder);
 		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder);
+		void ExecuteMaskAccumulateSolver_RenderThread(FRDGBuilder& GraphBuilder);
 		void ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder);
 
 	private:

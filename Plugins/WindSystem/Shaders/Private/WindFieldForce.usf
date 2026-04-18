@@ -1,0 +1,102 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+//
+// WindFieldForce.usf — External force injection pass.
+//
+// Reads the advected field and adds point/vortex wind source contributions.
+// Directional wind is handled separately in the advection and composition passes.
+//
+// Input:  AdvectedField (output of advection pass)
+// Output: Advected field + injected forces
+
+#include "/Engine/Private/Common.ush"
+#include "WindFieldCommon.ush"
+
+// ============================================================================
+// Parameters
+// ============================================================================
+
+float3 FieldOrigin;
+float  Time;
+float3 FieldExtent;
+uint   SourceCount;
+uint   ResolutionX;
+uint   ResolutionY;
+uint   ResolutionZ;
+float  DeltaTime;
+float  Dissipation;
+float  Padding0;
+float  Padding1;
+float  Padding2;
+
+StructuredBuffer<FGPUWindSource> WindSources;
+
+Texture3D<float4> AdvectedField;
+SamplerState AdvectedFieldSampler;
+
+RWTexture3D<float4> OutputField;
+
+// ============================================================================
+// Main
+// ============================================================================
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 8
+#endif
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, THREADGROUP_SIZE)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (DispatchThreadId.x >= ResolutionX ||
+	    DispatchThreadId.y >= ResolutionY ||
+	    DispatchThreadId.z >= ResolutionZ)
+	{
+		return;
+	}
+
+	float3 Resolution = float3(ResolutionX, ResolutionY, ResolutionZ);
+	float3 UVW = (float3(DispatchThreadId) + 0.5) / Resolution;
+	float3 WorldPos = FieldOrigin + UVW * FieldExtent;
+
+	// Read advected field at this texel
+	float4 Advected = AdvectedField.SampleLevel(AdvectedFieldSampler, UVW, 0);
+
+	// Accumulate external forces from point/vortex wind sources
+	float3 TotalForce = float3(0, 0, 0);
+
+	for (uint i = 0; i < SourceCount; i++)
+	{
+		FGPUWindSource Source = WindSources[i];
+		float3 WindContribution = float3(0, 0, 0);
+
+		if (Source.WindType == WIND_TYPE_POINT)
+		{
+			WindContribution = ComputePointWind(Source, WorldPos, Time);
+		}
+		else if (Source.WindType == WIND_TYPE_VORTEX)
+		{
+			WindContribution = ComputeVortexWind(Source, WorldPos, Time);
+		}
+		else if (Source.WindType == WIND_TYPE_CYLINDER)
+		{
+			WindContribution = ComputeCylinderWind(Source, WorldPos, Time);
+		}
+
+		TotalForce += WindContribution;
+	}
+
+	// Inject forces: InjectionRate = (1 - Dissipation) so at steady state u = F
+	float InjectionRate = 1.0 - Dissipation;
+	float4 Result;
+
+	if (DeltaTime > 0.0)
+	{
+		Result.xyz = Advected.xyz + InjectionRate * TotalForce;
+	}
+	else
+	{
+		// First frame — use direct source velocity
+		Result = float4(TotalForce, 0.0);
+	}
+
+	OutputField[DispatchThreadId] = Result;
+}

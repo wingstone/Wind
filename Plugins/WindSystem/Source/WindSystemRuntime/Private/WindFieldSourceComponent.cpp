@@ -15,24 +15,6 @@ UWindFieldSourceComponent::UWindFieldSourceComponent()
 #endif
 }
 
-FGPUWindSourceData UWindFieldSourceComponent::ToGPUData() const
-{
-	FGPUWindSourceData Data;
-	Data.Position = FVector3f(GetComponentLocation());
-	Data.Strength = Strength;
-	Data.Direction = FVector3f(GetForwardVector());
-	Data.Radius = Radius;
-	Data.InnerRadius = InnerRadius;
-	Data.FalloffExponent = FalloffExponent;
-	Data.WindType = static_cast<uint32>(GetWindType());
-	Data.GustAmount = GustAmount;
-	Data.GustFrequency = GustFrequency;
-	Data.NoiseStrength = NoiseStrength;
-	Data.NoiseFrequency = NoiseFrequency;
-	Data.Padding = 0.0f;
-	return Data;
-}
-
 void UWindFieldSourceComponent::OnRegister()
 {
 	Super::OnRegister();

@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "Wind System",
-	"Description": "GPU-accelerated wind field system using Scene Extensions, inspired by God of War GDC wind system",
+	"Description": "GPU-accelerated 3D wind field system using Scene Extensions, inspired by God of War GDC wind system",
 	"Category": "Rendering",
 	"CreatedBy": "",
 	"CreatedByURL": "",
@@ -16,11 +16,6 @@
 	"Modules": [
 		{
 			"Name": "WindSystemRuntime",
-			"Type": "Runtime",
-			"LoadingPhase": "PostConfigInit"
-		},
-		{
-			"Name": "WindSystemRenderer",
 			"Type": "Runtime",
 			"LoadingPhase": "PostConfigInit"
 		},

@@ -804,6 +804,114 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 	GraphBuilder.UseExternalAccessMode(HeightRefs[SceneData->CurrentHeightIndex], ERHIAccess::SRVMask, ERHIPipeline::All);
 }
 
+void FFluid2DFieldSceneExtension::FUpdater::ExecuteMaskAccumulateSolver_RenderThread(FRDGBuilder& GraphBuilder)
+{
+	check(IsInRenderingThread());
+
+	if (!SceneData->HeightFieldRT[0] || !SceneData->HeightFieldRT[1] || !SceneData->HeightFieldRT[2])
+	{
+		return;
+	}
+
+	
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneData->Scene.GetFeatureLevel());
+
+	const FFluid2DFluidConfig& Config = SceneData->CurrentConfig;
+	const uint32 GridSize = FMath::Max(Config.GridSize, 1);
+	const float CellSize = Config.WorldSize / static_cast<float>(GridSize);
+	const FVector2f GridOrigin(SceneData->WorldGridCenter - FVector2f(0.5f * Config.WorldSize));
+	const FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(FIntPoint(GridSize, GridSize), FIntPoint(16, 16));
+
+
+	FRDGTextureRef HeightRefs[3];
+	for (uint32 i = 0; i < 3; i++)
+	{
+		HeightRefs[i] = GraphBuilder.RegisterExternalTexture(SceneData->HeightFieldRT[i]);
+	}
+ 
+	// 1) Apply interaction impulses to current fields.
+	if (SceneData->CurrentInteractions.Num() > 0)
+	{
+		FFluid2DInteractionApplicationCS::FPermutationDomain PermutationVector;
+		PermutationVector.Set< FFluid2DInteractionApplicationCS::FApplyVelocity >(false);
+		auto InteractionCS = GlobalShaderMap->GetShader<FFluid2DInteractionApplicationCS>(PermutationVector);
+		for (const FFluid2DInteractionData& Interaction : SceneData->CurrentInteractions)
+		{
+			FFluid2DInteractionApplicationCS::FParameters* Parameters = GraphBuilder.AllocParameters<FFluid2DInteractionApplicationCS::FParameters>();
+			Parameters->GridSize = GridSize;
+			Parameters->CellSize = CellSize;
+			Parameters->GridOrigin = GridOrigin;
+			Parameters->InteractionDirectionalStrength = Interaction.StrengthParameter.X;
+			Parameters->InteractionOmniStrength = Interaction.StrengthParameter.Y;
+			Parameters->InteractionVortexStrength = Interaction.StrengthParameter.Z;
+			Parameters->InteractionRadius = Interaction.RadiusParameter.X;
+			Parameters->InteractionRadiusWidth = Interaction.RadiusParameter.Y;
+			Parameters->InteractionPowerFalloff = FMath::Max(Interaction.PowerFalloff, 1e-4f);
+			Parameters->InteractionHeightIntensity = Interaction.HeightIntensity;
+			Parameters->InteractionShapeType = (1u << static_cast<uint32>(Interaction.ShapeType));
+			Parameters->InteractionEmissionTypeMask = (1u << static_cast<uint32>(Interaction.EmissionType));
+			Parameters->InteractionPosition = FVector2f(Interaction.Position);
+			Parameters->InteractionDirection = FVector2f(Interaction.ForceDirection);
+			Parameters->HeightField = GraphBuilder.CreateUAV(HeightRefs[SceneData->CurrentHeightIndex]);
+			Parameters->VelocityField = nullptr;
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("Fluid2D.Interaction"),
+				ERDGPassFlags::Compute,
+				InteractionCS,
+				Parameters,
+				GroupCount);
+		}
+	}
+	SceneData->CurrentInteractions.Reset();
+
+	// 2) Copy and fade: HeightFieldRT[cur] → HeightFieldRT[next]
+	{
+		const TShaderMapRef<FFluid2DMaskAccumulateCS> MaskAccumulateCS(GlobalShaderMap);
+		FRDGTextureRef HeightOutput = GraphBuilder.RegisterExternalTexture(SceneData->HeightFieldRT[(SceneData->CurrentHeightIndex + 1) % 3], TEXT("Fluid2D.Height.Next"));
+
+		FFluid2DMaskAccumulateCS::FParameters* Parameters = GraphBuilder.AllocParameters<FFluid2DMaskAccumulateCS::FParameters>();
+		Parameters->GridSize = GridSize;
+		Parameters->FadeFactor = Config.MA_FadeFactor;
+		Parameters->CurrentHeightField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
+		Parameters->NextHeightField = GraphBuilder.CreateUAV(HeightOutput);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Fluid2D.MaskAccumulate"),
+			ERDGPassFlags::Compute,
+			MaskAccumulateCS,
+			Parameters,
+			GroupCount);
+
+		SceneData->CurrentHeightIndex = (SceneData->CurrentHeightIndex + 1) % 3;
+	}
+
+	// 3) Convert solved height field to packed normal XY (RG16F).
+	if (SceneData->NormalFieldRT)
+	{
+		const TShaderMapRef<FFluid2DHeightToNormalCS> HeightToNormalCS(GlobalShaderMap);
+		FRDGTextureRef NormalOutput = GraphBuilder.RegisterExternalTexture(SceneData->NormalFieldRT, TEXT("Fluid2D.Normal.Current"));
+
+		FFluid2DHeightToNormalCS::FParameters* Parameters = GraphBuilder.AllocParameters<FFluid2DHeightToNormalCS::FParameters>();
+		Parameters->GridSize = GridSize;
+		Parameters->CellSize = CellSize;
+		Parameters->HeightField = GraphBuilder.CreateSRV(HeightRefs[SceneData->CurrentHeightIndex]);
+		Parameters->OutNormalField = GraphBuilder.CreateUAV(NormalOutput);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Fluid2D.ShallowWater.HeightToNormal"),
+			ERDGPassFlags::Compute,
+			HeightToNormalCS,
+			Parameters,
+			GroupCount);
+			
+		GraphBuilder.UseExternalAccessMode(NormalOutput, ERHIAccess::SRVMask, ERHIPipeline::All);
+	}
+}
+
 void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms)
 {
 	const FFluid2DFluidConfig& Config = SceneData->CurrentConfig;
@@ -860,7 +968,7 @@ void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBui
 
 		ExecuteShallowWaterSolver_RenderThread(GraphBuilder);
 	}
-	else
+	else if (SceneData->CurrentConfig.SolverType == EFluidSolverType::NavierStokes)
 	{
 		// Navier-Stokes solver resources
 		for (uint32 i = 0; i < 3; i++)
@@ -925,6 +1033,40 @@ void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBui
 		}
 
 		ExecuteNavierStokesSolver_RenderThread(GraphBuilder);
+	}
+	else if (SceneData->CurrentConfig.SolverType == EFluidSolverType::MaskAccumulate)
+	{
+		for (uint32 i = 0; i < 3; i++)
+		{
+			if (!SceneData->HeightFieldRT[i])
+			{
+				GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->HeightFieldRT[i], TEXT("HeightFieldRT"));
+				FRDGTextureRef HeightTexture = GraphBuilder.RegisterExternalTexture(SceneData->HeightFieldRT[i], TEXT("Fluid2D.Height.InitClear"));
+				AddClearRenderTargetPass(GraphBuilder, HeightTexture, FLinearColor::Black);
+			}
+		}
+		
+		if (!SceneData->TempHeightFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent), SceneData->TempHeightFieldRT, TEXT("TempHeightFieldRT"));
+			FRDGTextureRef TempHeightTexture = GraphBuilder.RegisterExternalTexture(SceneData->TempHeightFieldRT, TEXT("Fluid2D.TempHeight.InitClear"));
+			AddClearRenderTargetPass(GraphBuilder, TempHeightTexture, FLinearColor::Black);
+		}
+
+		if (!SceneData->NormalFieldRT)
+		{
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->NormalFieldRT, TEXT("NormalFieldRT"));
+			FRDGTextureRef NormalTexture = GraphBuilder.RegisterExternalTexture(SceneData->NormalFieldRT, TEXT("Fluid2D.Normal.InitClear"));
+			AddClearRenderTargetPass(GraphBuilder, NormalTexture, FLinearColor::Black);
+		}
+
+		// Apply pending scroll before simulation
+		if (SceneData->GridScrollOffset != FIntVector2::ZeroValue)
+		{
+			ApplyScroll_RenderThread(GraphBuilder);
+		}
+
+		ExecuteMaskAccumulateSolver_RenderThread(GraphBuilder);
 	}
 }
 

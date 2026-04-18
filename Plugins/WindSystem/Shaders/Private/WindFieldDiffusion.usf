@@ -1,0 +1,92 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+//
+// WindFieldDiffusion.usf — Diffusion pass with two solver methods.
+//
+// DIFFUSION_METHOD permutation (set from C++):
+//   0 = Explicit finite difference (forward Euler)
+//       u_new = u_center + α·(Σ neighbors - 6·u_center)
+//       Fast, single pass, but requires small α for stability (α < 1/6).
+//
+//   1 = Implicit Jacobi iteration
+//       u_new = (u_center + α·Σ neighbors) / (1 + 6α)
+//       Unconditionally stable, smoother results.
+//
+// α = ν·Δt / h²
+//
+// Input:  InputField (output of force injection pass)
+// Output: Diffused wind field (final result)
+
+#include "/Engine/Private/Common.ush"
+
+// ============================================================================
+// Parameters
+// ============================================================================
+
+float3 FieldOrigin;
+float  DeltaTime;
+float3 FieldExtent;
+float  Viscosity;
+uint   ResolutionX;
+uint   ResolutionY;
+uint   ResolutionZ;
+float  Padding0;
+
+Texture3D<float4> InputField;
+SamplerState InputFieldSampler;
+
+RWTexture3D<float4> OutputField;
+
+// ============================================================================
+// Main
+// ============================================================================
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 8
+#endif
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, THREADGROUP_SIZE)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (DispatchThreadId.x >= ResolutionX ||
+	    DispatchThreadId.y >= ResolutionY ||
+	    DispatchThreadId.z >= ResolutionZ)
+	{
+		return;
+	}
+
+	float3 Resolution = float3(ResolutionX, ResolutionY, ResolutionZ);
+	float3 UVW = (float3(DispatchThreadId) + 0.5) / Resolution;
+	float3 TexelSize = 1.0 / Resolution;
+
+	// Compute cell spacing in world units (h)
+	float3 CellSize = FieldExtent / Resolution;
+	float h2 = dot(CellSize, CellSize) / 3.0; // average h²
+
+	float Alpha = Viscosity * DeltaTime / max(h2, 1e-6);
+
+	// Sample center + 6 neighbors
+	float4 Center = InputField.SampleLevel(InputFieldSampler, UVW, 0);
+	float4 Lxp = InputField.SampleLevel(InputFieldSampler, UVW + float3(TexelSize.x, 0, 0), 0);
+	float4 Lxn = InputField.SampleLevel(InputFieldSampler, UVW - float3(TexelSize.x, 0, 0), 0);
+	float4 Lyp = InputField.SampleLevel(InputFieldSampler, UVW + float3(0, TexelSize.y, 0), 0);
+	float4 Lyn = InputField.SampleLevel(InputFieldSampler, UVW - float3(0, TexelSize.y, 0), 0);
+	float4 Lzp = InputField.SampleLevel(InputFieldSampler, UVW + float3(0, 0, TexelSize.z), 0);
+	float4 Lzn = InputField.SampleLevel(InputFieldSampler, UVW - float3(0, 0, TexelSize.z), 0);
+
+	float4 NeighborSum = Lxp + Lxn + Lyp + Lyn + Lzp + Lzn;
+
+#if DIFFUSION_METHOD == 0
+	// Explicit finite difference (forward Euler):
+	//   u_new = u + α·∇²u = u + α·(Σ neighbors - 6·u)
+	// Clamp α to ensure stability (α < 1/6 for 3D).
+	float StableAlpha = min(Alpha, 0.16);
+	float4 Laplacian = NeighborSum - 6.0 * Center;
+	float4 Result = Center + StableAlpha * Laplacian;
+#else
+	// Jacobi iteration (implicit):
+	//   u_new = (u_center + α·Σ neighbors) / (1 + 6α)
+	float4 Result = (Center + Alpha * NeighborSum) / (1.0 + 6.0 * Alpha);
+#endif
+
+	OutputField[DispatchThreadId] = Result;
+}

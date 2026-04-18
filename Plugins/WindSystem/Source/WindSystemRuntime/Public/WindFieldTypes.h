@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "RHI.h"
 #include "WindFieldTypes.generated.h"
 
 /** Wind source type enumeration */
@@ -12,7 +13,17 @@ enum class EWindFieldSourceType : uint8
 	Directional = 0 UMETA(DisplayName = "Directional"),
 	Point       = 1 UMETA(DisplayName = "Point"),
 	Vortex      = 2 UMETA(DisplayName = "Vortex"),
-	Gust        = 3 UMETA(DisplayName = "Gust"),
+	Cylinder    = 3 UMETA(DisplayName = "Cylinder"),
+};
+
+/** Diffusion solver method */
+UENUM(BlueprintType)
+enum class EWindDiffusionMethod : uint8
+{
+	/** Explicit forward Euler finite difference. Fast but requires small Viscosity for stability. */
+	FiniteDifference = 0 UMETA(DisplayName = "Finite Difference (Explicit)"),
+	/** Implicit Jacobi iteration. Unconditionally stable, smoother results. */
+	Jacobi           = 1 UMETA(DisplayName = "Jacobi (Implicit)"),
 };
 
 /**
@@ -28,10 +39,10 @@ struct FGPUWindSourceData
 	float     InnerRadius;       //  4 bytes  offset 32
 	float     FalloffExponent;   //  4 bytes  offset 36
 	uint32    WindType;          //  4 bytes  offset 40
-	float     GustAmount;        //  4 bytes  offset 44
-	float     GustFrequency;     //  4 bytes  offset 48
-	float     NoiseStrength;     //  4 bytes  offset 52
-	float     NoiseFrequency;    //  4 bytes  offset 56
+	float     HalfHeight;        //  4 bytes  offset 44  (Cylinder/Cone)
+	float     EndRadius;         //  4 bytes  offset 48  (Cylinder/Cone top radius)
+	float     Padding3;     //  4 bytes  offset 52
+	float     Padding4;    //  4 bytes  offset 56
 	float     Padding;           //  4 bytes  offset 60
 	// Total: 64 bytes
 };
@@ -46,11 +57,32 @@ struct WINDSYSTEMRUNTIME_API FWindFieldConfig
 
 	/** Resolution of the 3D wind field texture (texels per axis) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field")
-	FIntVector Resolution = FIntVector(64, 16, 64);
+	FIntVector Resolution = FIntVector(64, 64, 32);
 
 	/** World-space extent of the wind field volume (cm), centered on the camera */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field")
 	FVector WorldExtent = FVector(6400.0, 1600.0, 6400.0);
+
+	/** Viscosity coefficient for diffusion (higher = smoother, more viscous wind).
+	 *  Controls the strength of the Laplacian smoothing term. Keep below 0.15 for stability. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field", meta = (ClampMin = "0", ClampMax = "0.15"))
+	float Viscosity = 0.05f;
+
+	/** Dissipation factor per frame (lower = faster energy decay, 1.0 = no decay).
+	 *  At steady state the wind velocity equals the source's contribution. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field", meta = (ClampMin = "0.8", ClampMax = "1.0"))
+	float Dissipation = 0.98f;
+
+	/** Diffusion solver method.
+	 *  Finite Difference: explicit forward Euler, fast but needs small Viscosity (< 0.1).
+	 *  Jacobi: implicit solver, unconditionally stable, smoother results. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field")
+	EWindDiffusionMethod DiffusionMethod = EWindDiffusionMethod::Jacobi;
+
+	/** Number of Jacobi iterations per frame (only used when DiffusionMethod == Jacobi).
+	 *  More iterations = better convergence / smoother result, but higher GPU cost. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field", meta = (ClampMin = "1", ClampMax = "30", EditCondition = "DiffusionMethod == EWindDiffusionMethod::Jacobi"))
+	int32 JacobiIterations = 4;
 };
 
 /** Result of sampling the wind field at a world position */
@@ -64,4 +96,31 @@ struct WINDSYSTEMRUNTIME_API FWindSample
 
 	UPROPERTY(BlueprintReadOnly, Category = "Wind")
 	float Turbulence = 0.0f;
+};
+
+/**
+ * Render-thread data for the global directional wind.
+ * Transported from game thread via ENQUEUE_RENDER_COMMAND.
+ * Contains wind direction/strength, curl noise, and optional noise texture.
+ * The directional wind is static — it does not participate in fluid iteration.
+ */
+struct FWindDirectionalData
+{
+	/** Whether directional wind is enabled */
+	bool bEnabled = false;
+
+	// --- Wind parameters ---
+	FVector3f WindDirection = FVector3f(1.0f, 0.0f, 0.0f);
+	float Strength = 0.0f;
+	
+	// --- Noise texture modulation ---
+	FTextureRHIRef NoiseTextureRHI = nullptr;
+	float NoiseStrength = 0.0f;
+	float Tiling = 1.0f;
+	float IntensityMin = 0.2f;
+	float IntensityMax = 1.0f;
+	float ScrollSpeed = 50.0f;
+
+	bool IsValid() const { return bEnabled; }
+	bool HasNoiseTexture() const { return NoiseTextureRHI != nullptr; }
 };

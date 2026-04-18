@@ -2,13 +2,18 @@
 
 #include "WindSubsystem.h"
 #include "WindFieldSourceComponent.h"
-#include "WindFieldGPUData.h"
+#include "WindFieldDirectionalComponent.h"
+#include "WindFieldTypes.h"
+#include "WindFieldSceneExtension.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "SceneInterface.h"
+#include "ScenePrivate.h"
+#include "RendererInterface.h"
 
-DECLARE_STATS_GROUP(TEXT("WindSystem"), STATGROUP_WindSystem, STATCAT_Advanced);
-DECLARE_CYCLE_STAT(TEXT("WindSystem Tick"), STAT_WindSystem_Tick, STATGROUP_WindSystem);
+DEFINE_LOG_CATEGORY_STATIC(LogWindSystem, Log, All);
 
 // ============================================================================
 // USubsystem interface
@@ -18,38 +23,35 @@ void UWindSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-	FieldProxy = MakeShared<FWindFieldProxy>();
-	FWindFieldProxyRegistry::Get().Register(GetWorld(), FieldProxy);
+	UE_LOG(LogWindSystem, Log, TEXT("WindSubsystem initialized - Resolution: %dx%dx%d, WorldExtent: %.0fx%.0fx%.0f"),
+		WindFieldConfig.Resolution.X, WindFieldConfig.Resolution.Y, WindFieldConfig.Resolution.Z,
+		WindFieldConfig.WorldExtent.X, WindFieldConfig.WorldExtent.Y, WindFieldConfig.WorldExtent.Z);
 }
 
 void UWindSubsystem::Deinitialize()
 {
-	FWindFieldProxyRegistry::Get().Unregister(GetWorld());
-	FieldProxy.Reset();
 	RegisteredSources.Empty();
-
+	DirectionalWindComponent = nullptr;
 	Super::Deinitialize();
 }
 
 void UWindSubsystem::Tick(float DeltaTime)
 {
-	SCOPE_CYCLE_COUNTER(STAT_WindSystem_Tick);
-
 	Super::Tick(DeltaTime);
-	UpdateGPUData();
+	UpdateWindField();
 }
 
 TStatId UWindSubsystem::GetStatId() const
 {
-	RETURN_QUICK_DECLARE_CYCLE_STAT(UWindSubsystem, STATGROUP_WindSystem);
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UWindSubsystem, STATGROUP_Tickables);
 }
 
 bool UWindSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
 {
-	// Support game worlds, PIE, and editor preview
 	return WorldType == EWorldType::Game
 		|| WorldType == EWorldType::PIE
-		|| WorldType == EWorldType::Editor;
+		|| WorldType == EWorldType::Editor
+		|| WorldType == EWorldType::GamePreview;
 }
 
 // ============================================================================
@@ -58,9 +60,9 @@ bool UWindSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) cons
 
 void UWindSubsystem::RegisterWindSource(UWindFieldSourceComponent* Source)
 {
-	if (Source && !RegisteredSources.Contains(Source))
+	if (Source)
 	{
-		RegisteredSources.Add(Source);
+		RegisteredSources.AddUnique(Source);
 	}
 }
 
@@ -69,6 +71,110 @@ void UWindSubsystem::UnregisterWindSource(UWindFieldSourceComponent* Source)
 	RegisteredSources.Remove(Source);
 }
 
+void UWindSubsystem::RegisterDirectionalWind(UWindFieldDirectionalComponent* Component)
+{
+	if (Component)
+	{
+		DirectionalWindComponent = Component;
+	}
+}
+
+void UWindSubsystem::UnregisterDirectionalWind(UWindFieldDirectionalComponent* Component)
+{
+	if (DirectionalWindComponent == Component)
+	{
+		DirectionalWindComponent = nullptr;
+	}
+}
+
+FWindFieldSceneExtension* UWindSubsystem::GetSceneExtension() const
+{
+	if (GetWorld() && GetWorld()->Scene && GetWorld()->Scene->GetRenderScene())
+	{
+		return GetWorld()->Scene->GetRenderScene()->GetExtensionPtr<FWindFieldSceneExtension>();
+	}
+	return nullptr;
+}
+
+// ============================================================================
+// GPU data push — collect sources and push to render thread
+// ============================================================================
+
+void UWindSubsystem::UpdateWindField()
+{
+	if (!GetWorld() || !GetWorld()->Scene)
+	{
+		return;
+	}
+
+	// Collect directional wind data (static, separate from fluid sources)
+	FWindDirectionalData DirectionalData;
+	if (DirectionalWindComponent && DirectionalWindComponent->IsWindEnabled())
+	{
+		DirectionalData = DirectionalWindComponent->GetDirectionalData();
+	}
+
+	// Collect fluid source data (Point, Vortex)
+	TArray<FGPUWindSourceData> Sources;
+	Sources.Reserve(RegisteredSources.Num());
+
+	for (const UWindFieldSourceComponent* Source : RegisteredSources)
+	{
+		if (Source && Source->IsActive())
+		{
+			Sources.Add(Source->ToGPUData());
+		}
+	}
+
+	if (Sources.Num() == 0 && !DirectionalData.IsValid())
+	{
+		return;
+	}
+
+	const FVector3f Center = FVector3f(GetFieldCenterPosition());
+	const float Time = GetWorld()->GetTimeSeconds();
+	const float Delta = GetWorld()->GetDeltaSeconds();
+	const FWindFieldConfig Config = WindFieldConfig;
+
+	ENQUEUE_RENDER_COMMAND(WindField_UpdateSources)(
+		[WorldScene = GetWorld()->Scene, Sources = MoveTemp(Sources), Center, Time, Delta, Config, DirectionalData = MoveTemp(DirectionalData)](FRHICommandListImmediate& RHICmdList)
+		{
+			if (WorldScene->GetRenderScene())
+			{
+				if (FWindFieldSceneExtension* Ext = WorldScene->GetRenderScene()->GetExtensionPtr<FWindFieldSceneExtension>())
+				{
+					Ext->SetSourceData_RenderThread(Sources, Center, Time, Delta, Config, DirectionalData);
+				}
+			}
+		});
+}
+
+FVector UWindSubsystem::GetFieldCenterPosition() const
+{
+	if (const UWorld* World = GetWorld())
+	{
+		if (const APlayerController* PC = World->GetFirstPlayerController())
+		{
+			if (PC->PlayerCameraManager)
+			{
+				return PC->PlayerCameraManager->GetCameraLocation();
+			}
+			if (const APawn* Pawn = PC->GetPawn())
+			{
+				return Pawn->GetActorLocation();
+			}
+		}
+
+		auto ViewLocations = World->ViewLocationsRenderedLastFrame;
+		if (ViewLocations.Num() > 0)
+		{
+			return ViewLocations[0];
+		}
+	}
+	return FVector::ZeroVector;
+}
+
+// ============================================================================
 // ============================================================================
 // CPU sampling (fallback for AI, character movement, etc.)
 // ============================================================================
@@ -76,6 +182,12 @@ void UWindSubsystem::UnregisterWindSource(UWindFieldSourceComponent* Source)
 FWindSample UWindSubsystem::SampleWindAtLocation(FVector WorldPosition) const
 {
 	FWindSample Result;
+
+	// Global directional wind (static)
+	if (DirectionalWindComponent && DirectionalWindComponent->IsWindEnabled())
+	{
+		Result.WindVelocity += FVector(DirectionalWindComponent->GetForwardVector()) * DirectionalWindComponent->Strength;
+	}
 
 	for (const UWindFieldSourceComponent* Source : RegisteredSources)
 	{
@@ -89,12 +201,6 @@ FWindSample UWindSubsystem::SampleWindAtLocation(FVector WorldPosition) const
 
 		switch (static_cast<EWindFieldSourceType>(GPUData.WindType))
 		{
-		case EWindFieldSourceType::Directional:
-		{
-			FVector3f Wind = GPUData.Direction * GPUData.Strength;
-			Result.WindVelocity += FVector(Wind);
-			break;
-		}
 		case EWindFieldSourceType::Point:
 		{
 			FVector3f Delta = Pos - GPUData.Position;
@@ -115,10 +221,36 @@ FWindSample UWindSubsystem::SampleWindAtLocation(FVector WorldPosition) const
 			if (HorizDist < GPUData.Radius && HorizDist > KINDA_SMALL_NUMBER)
 			{
 				FVector3f Tangent(-Delta.Z / HorizDist, 0.0f, Delta.X / HorizDist);
-				float NormDist = FMath::Clamp(HorizDist / GPUData.Radius, 0.0f, 1.0f);
+				float OuterFade = 1.0f - FMath::Clamp(HorizDist / GPUData.Radius, 0.0f, 1.0f);
 				float InnerFade = FMath::Clamp(HorizDist / FMath::Max(GPUData.InnerRadius, 1.0f), 0.0f, 1.0f);
-				float Atten = (1.0f - NormDist) * InnerFade;
-				Result.WindVelocity += FVector(Tangent * GPUData.Strength * Atten);
+				Result.WindVelocity += FVector(Tangent * GPUData.Strength * OuterFade * InnerFade);
+			}
+			break;
+		}
+		case EWindFieldSourceType::Cylinder:
+		{
+			FVector3f Delta = Pos - GPUData.Position;
+			FVector3f Axis = GPUData.Direction;
+			float AxisDist = FVector3f::DotProduct(Delta, Axis);
+			float HH = GPUData.HalfHeight;
+			if (FMath::Abs(AxisDist) <= HH)
+			{
+				float t = (AxisDist + HH) / (2.0f * HH);
+				float LocalRadius = FMath::Lerp(GPUData.Radius, GPUData.EndRadius, t);
+				FVector3f RadialVec = Delta - Axis * AxisDist;
+				float RadialDist = RadialVec.Length();
+				if (RadialDist <= LocalRadius)
+				{
+					float RadialAtten = 1.0f;
+					float InnerR = FMath::Min(GPUData.InnerRadius, LocalRadius);
+					if (LocalRadius > InnerR)
+					{
+						float NormDist = FMath::Clamp((RadialDist - InnerR) / (LocalRadius - InnerR), 0.0f, 1.0f);
+						RadialAtten = FMath::Pow(1.0f - NormDist, GPUData.FalloffExponent);
+					}
+					float EdgeFade = 1.0f - FMath::SmoothStep(0.85f, 1.0f, FMath::Abs(AxisDist) / HH);
+					Result.WindVelocity += FVector(Axis * GPUData.Strength * RadialAtten * EdgeFade);
+				}
 			}
 			break;
 		}
@@ -128,47 +260,4 @@ FWindSample UWindSubsystem::SampleWindAtLocation(FVector WorldPosition) const
 	}
 
 	return Result;
-}
-
-// ============================================================================
-// GPU data push
-// ============================================================================
-
-void UWindSubsystem::UpdateGPUData()
-{
-	if (!FieldProxy.IsValid())
-	{
-		return;
-	}
-
-	TArray<FGPUWindSourceData> Sources;
-	Sources.Reserve(RegisteredSources.Num());
-
-	for (const UWindFieldSourceComponent* Source : RegisteredSources)
-	{
-		if (Source && Source->IsActive())
-		{
-			Sources.Add(Source->ToGPUData());
-		}
-	}
-
-	const FVector3f Center = FVector3f(GetFieldCenterPosition());
-	const float Time = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-
-	FieldProxy->UpdateSources_GameThread(MoveTemp(Sources), Center, Time, WindFieldConfig);
-}
-
-FVector UWindSubsystem::GetFieldCenterPosition() const
-{
-	// Try to use the first player's camera position
-	const UWorld* World = GetWorld();
-	if (World)
-	{
-		const APlayerController* PC = World->GetFirstPlayerController();
-		if (PC && PC->PlayerCameraManager)
-		{
-			return PC->PlayerCameraManager->GetCameraLocation();
-		}
-	}
-	return FVector::ZeroVector;
 }

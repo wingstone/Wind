@@ -515,3 +515,27 @@ class FFluid2DComposeVelocityCS : public FGlobalShader
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
 	}
 };
+
+class FFluid2DMaskAccumulateCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FFluid2DMaskAccumulateCS);
+	SHADER_USE_PARAMETER_STRUCT(FFluid2DMaskAccumulateCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(uint32, GridSize)
+		SHADER_PARAMETER(float, FadeFactor)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, CurrentHeightField)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, NextHeightField)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), 16);
+	}
+};

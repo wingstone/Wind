@@ -21,6 +21,7 @@ public class WindSystemEditor : ModuleRules
 			"UnrealEd",
 			"Slate",
 			"SlateCore",
+			"ComponentVisualizers",
 		});
 	}
 }

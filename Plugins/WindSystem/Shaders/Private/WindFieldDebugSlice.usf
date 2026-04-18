@@ -1,0 +1,83 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+//
+// WindFieldDebugSlice.usf — Renders slices of the 3D wind field into a 2D atlas.
+//
+// Each Y-layer of the 3D texture is placed side-by-side in a horizontal strip.
+// Wind velocity is visualized as: RG = XY direction, B = Z component, A = speed.
+
+#include "/Engine/Private/Common.ush"
+
+// ============================================================================
+// Parameters
+// ============================================================================
+
+uint   VolumeResX;
+uint   VolumeResY;
+uint   VolumeResZ;
+uint   SliceCols;       // number of columns in the atlas grid
+float  VelocityScale;   // multiply velocity for visibility (default ~0.01)
+uint   Padding0;
+uint   Padding1;
+uint   Padding2;
+
+Texture3D<float4> WindFieldVolume;
+SamplerState WindFieldVolumeSampler;
+
+RWTexture2D<float4> OutputAtlas;
+
+// ============================================================================
+// Main
+// ============================================================================
+
+#ifndef THREADGROUP_SIZE_2D
+#define THREADGROUP_SIZE_2D 8
+#endif
+
+[numthreads(THREADGROUP_SIZE_2D, THREADGROUP_SIZE_2D, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Each atlas cell is VolumeResX x VolumeResY pixels
+	uint CellX = VolumeResX;
+	uint CellY = VolumeResY;
+
+	// Which atlas cell (= which Y-slice)?
+	uint Col = DispatchThreadId.x / CellX;
+	uint Row = DispatchThreadId.y / CellY;
+
+	uint SliceIndex = Row * SliceCols + Col;
+	if (SliceIndex >= VolumeResZ)
+		return;
+
+	// Local texel within the cell
+	uint LocalX = DispatchThreadId.x - Col * CellX;
+	uint LocalY = DispatchThreadId.y - Row * CellY;
+
+	if (LocalX >= CellX || LocalY >= CellY)
+		return;
+
+	// Sample the 3D texture
+	float3 UVW = float3(
+		(float(LocalX) + 0.5) / float(VolumeResX),
+		(float(LocalY) + 0.5) / float(VolumeResY),
+		(float(SliceIndex) + 0.5) / float(VolumeResZ));
+
+	float4 WindValue = WindFieldVolume.SampleLevel(WindFieldVolumeSampler, UVW, 0);
+
+	// Visualize: encode velocity direction & magnitude as color
+	float3 Vel = WindValue.xyz;
+	float Speed = length(Vel);
+	float ScaledSpeed = saturate(Speed * VelocityScale);
+
+	// Map velocity to color:
+	//   R = positive X (+forward), G = positive Y (+right), B = positive Z (+up)
+	//   Negative components go darker.  Background is black = no wind.
+	float3 Color;
+	Color.r = saturate(Vel.x * VelocityScale * 0.5 + 0.5);
+	Color.g = saturate(Vel.y * VelocityScale * 0.5 + 0.5);
+	Color.b = saturate(Vel.z * VelocityScale * 0.5 + 0.5);
+
+	// Boost saturation by mixing with speed-based brightness
+	Color = lerp(Color, float3(ScaledSpeed, ScaledSpeed * 0.6, ScaledSpeed * 0.2), 0.3);
+
+	OutputAtlas[DispatchThreadId.xy] = float4(Color, 1.0);
+}

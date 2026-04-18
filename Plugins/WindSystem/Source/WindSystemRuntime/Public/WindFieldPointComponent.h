@@ -19,6 +19,22 @@ class WINDSYSTEMRUNTIME_API UWindFieldPointComponent : public UWindFieldSourceCo
 public:
 	UWindFieldPointComponent();
 
+	/** Base wind strength (cm/s) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source")
+	float Strength = 300.0f;
+
+	/** Effect radius (cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "1"))
+	float Radius = 500.0f;
+
+	/** Inner radius with full strength (cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "0"))
+	float InnerRadius = 50.0f;
+
+	/** Falloff exponent (1 = linear, 2 = quadratic, etc.) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "0.1"))
+	float FalloffExponent = 2.0f;
+
 	virtual EWindFieldSourceType GetWindType() const override { return EWindFieldSourceType::Point; }
 	virtual FGPUWindSourceData ToGPUData() const override;
 };

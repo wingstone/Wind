@@ -16,7 +16,10 @@ enum class EFluidSolverType : uint8
 	ShallowWater UMETA(DisplayName = "Shallow Water Equations"),
 	
 	/** 2D Incompressible Navier-Stokes - More accurate, suitable for detailed fluid dynamics with vorticity */
-	NavierStokes UMETA(DisplayName = "2D Navier-Stokes")
+	NavierStokes UMETA(DisplayName = "2D Navier-Stokes"),
+
+	/** Mask Accumulate - Used for special effects, such as murky water or other visual effects */
+	MaskAccumulate UMETA(DisplayName = "Mask Accumulate")
 };
 
 UENUM(BlueprintType)
@@ -105,6 +108,10 @@ struct FFluid2DFluidConfig
 	/** Only used for shallow water solver, controls wave diffusion */ 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float SW_DiffusionBeta = 0.95f;
+
+	/** Mask accumulate fade factor */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
+	float MA_FadeFactor = 0.98f;
 };
 
 /** Render-thread-safe snapshot of global flow data (produced by UFluid2DGlobalFlowComponent) */

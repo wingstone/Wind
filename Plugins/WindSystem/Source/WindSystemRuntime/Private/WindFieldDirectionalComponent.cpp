@@ -1,30 +1,93 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "WindFieldDirectionalComponent.h"
+#include "WindSubsystem.h"
+#include "Engine/Texture2D.h"
+#include "Engine/World.h"
 
 UWindFieldDirectionalComponent::UWindFieldDirectionalComponent()
 {
-	// Directional wind defaults: infinite radius, moderate strength
-	Radius = 0.0f;        // 0 = infinite for directional
-	Strength = 200.0f;
-	GustAmount = 0.3f;
-	GustFrequency = 0.5f;
-	NoiseStrength = 0.2f;
-	NoiseFrequency = 0.5f;
+	PrimaryComponentTick.bCanEverTick = false;
+	bAutoActivate = true;
+	SetIsReplicatedByDefault(false);
+
+#if WITH_EDITORONLY_DATA
+	bVisualizeComponent = true;
+#endif
 }
 
-FGPUWindSourceData UWindFieldDirectionalComponent::ToGPUData() const
+void UWindFieldDirectionalComponent::OnRegister()
 {
-	FGPUWindSourceData Data = Super::ToGPUData();
+	Super::OnRegister();
+	RegisterWithSubsystem();
+}
 
-	// Directional wind: direction is the component's forward vector
-	Data.Direction = FVector3f(GetForwardVector());
+void UWindFieldDirectionalComponent::OnUnregister()
+{
+	UnregisterFromSubsystem();
+	Super::OnUnregister();
+}
 
-	// Override radius to a very large value for GPU (0 is not valid for GPU math)
-	if (Data.Radius <= 0.0f)
+#if WITH_EDITOR
+void UWindFieldDirectionalComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+}
+#endif
+
+FWindDirectionalData UWindFieldDirectionalComponent::GetDirectionalData() const
+{
+	FWindDirectionalData Data;
+	Data.bEnabled = bEnableDirectionalWind;
+	Data.WindDirection = FVector3f(GetForwardVector());
+	Data.Strength = Strength;
+	Data.NoiseStrength = NoiseStrength;
+
+	if (HasNoiseTexture())
 	{
-		Data.Radius = 1000000.0f;
+		Data.NoiseTextureRHI = WindNoiseTexture->GetResource()->TextureRHI;
 	}
+	Data.Tiling = WindNoiseTiling;
+	Data.IntensityMin = WindNoiseIntensityMin;
+	Data.IntensityMax = WindNoiseIntensityMax;
+	Data.ScrollSpeed = WindNoiseScrollSpeed;
 
 	return Data;
+}
+
+bool UWindFieldDirectionalComponent::IsWindEnabled() const
+{
+	return bEnableDirectionalWind && IsActive();
+}
+
+bool UWindFieldDirectionalComponent::HasNoiseTexture() const
+{
+	return WindNoiseTexture != nullptr
+		&& WindNoiseTexture->GetResource() != nullptr
+		&& WindNoiseTexture->GetResource()->TextureRHI != nullptr;
+}
+
+void UWindFieldDirectionalComponent::RegisterWithSubsystem()
+{
+	if (UWindSubsystem* Sub = GetWindSubsystem())
+	{
+		Sub->RegisterDirectionalWind(this);
+	}
+}
+
+void UWindFieldDirectionalComponent::UnregisterFromSubsystem()
+{
+	if (UWindSubsystem* Sub = GetWindSubsystem())
+	{
+		Sub->UnregisterDirectionalWind(this);
+	}
+}
+
+UWindSubsystem* UWindFieldDirectionalComponent::GetWindSubsystem() const
+{
+	if (UWorld* World = GetWorld())
+	{
+		return World->GetSubsystem<UWindSubsystem>();
+	}
+	return nullptr;
 }

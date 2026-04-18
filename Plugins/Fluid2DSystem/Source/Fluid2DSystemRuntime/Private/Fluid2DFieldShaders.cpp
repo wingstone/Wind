@@ -28,3 +28,6 @@ IMPLEMENT_GLOBAL_SHADER(FNSVorticityConfinementCS, "/Plugin/Fluid2DSystem/Privat
 // Global Flow
 IMPLEMENT_GLOBAL_SHADER(FFluid2DGlobalFlowCS, "/Plugin/Fluid2DSystem/Private/Fluid2DGlobalFlow.usf", "GlobalFlowCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FFluid2DComposeVelocityCS, "/Plugin/Fluid2DSystem/Private/Fluid2DGlobalFlow.usf", "ComposeVelocityCS", SF_Compute);
+
+// Mask Accumulate Solver
+IMPLEMENT_GLOBAL_SHADER(FFluid2DMaskAccumulateCS, "/Plugin/Fluid2DSystem/Private/MaskAccumulateSolver.usf", "MaskAccumulateCS", SF_Compute);

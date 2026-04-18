@@ -1,12 +1,12 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-#include "WindFieldPointComponent.h"
+#include "WindFieldCylinderComponent.h"
 
-UWindFieldPointComponent::UWindFieldPointComponent()
+UWindFieldCylinderComponent::UWindFieldCylinderComponent()
 {
 }
 
-FGPUWindSourceData UWindFieldPointComponent::ToGPUData() const
+FGPUWindSourceData UWindFieldCylinderComponent::ToGPUData() const
 {
 	FGPUWindSourceData Data = {};
 	Data.Position = FVector3f(GetComponentLocation());
@@ -16,5 +16,7 @@ FGPUWindSourceData UWindFieldPointComponent::ToGPUData() const
 	Data.InnerRadius = InnerRadius;
 	Data.FalloffExponent = FalloffExponent;
 	Data.WindType = static_cast<uint32>(GetWindType());
+	Data.HalfHeight = FMath::Max(HalfHeight, 1.0f);
+	Data.EndRadius = FMath::Max(EndRadius, 0.0f);
 	return Data;
 }
