@@ -84,19 +84,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		TotalForce += WindContribution;
 	}
 
-	// Inject forces: InjectionRate = (1 - Dissipation) so at steady state u = F
-	float InjectionRate = 1.0 - Dissipation;
-	float4 Result;
-
-	if (DeltaTime > 0.0)
-	{
-		Result.xyz = Advected.xyz + InjectionRate * TotalForce;
-	}
-	else
-	{
-		// First frame — use direct source velocity
-		Result = float4(TotalForce, 0.0);
-	}
-
-	OutputField[DispatchThreadId] = Result;
+	OutputField[DispatchThreadId] = float4(TotalForce, 0.0);
 }
