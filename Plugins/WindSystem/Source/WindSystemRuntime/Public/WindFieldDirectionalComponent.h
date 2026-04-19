@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
 #include "WindFieldTypes.h"
+#include "DrawDebugHelpers.h"
 #include "WindFieldDirectionalComponent.generated.h"
 
 class UTexture2D;
@@ -75,6 +76,11 @@ public:
 
 	/** Returns true if a valid noise texture is assigned */
 	bool HasNoiseTexture() const;
+
+	/** Draw debug visualization of the directional wind */
+	void DrawDebug(float Lifetime = 0.0f) const;
+
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
 	virtual void OnRegister() override;

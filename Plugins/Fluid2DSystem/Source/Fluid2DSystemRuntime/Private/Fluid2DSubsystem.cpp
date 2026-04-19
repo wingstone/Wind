@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Fluid2DSubsystem.h"
+#include "GameFramework/Pawn.h"
 #include "Fluid2DSystemSettings.h"
 #include "Fluid2DFieldSceneExtension.h"
 #include "Fluid2DInteractionComponent.h"

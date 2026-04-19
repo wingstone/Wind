@@ -4,11 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "UObject/UnrealType.h"
 #include "WindFieldTypes.h"
 #include "WindSubsystem.generated.h"
 
 class UWindFieldSourceComponent;
 class UWindFieldDirectionalComponent;
+class UWindFieldConfigComponent;
+class UWindSystemSettings;
 class FWindFieldSceneExtension;
 
 /**
@@ -25,6 +28,8 @@ class WINDSYSTEMRUNTIME_API UWindSubsystem : public UTickableWorldSubsystem
 	GENERATED_BODY()
 
 public:
+
+	UWindSubsystem();
 
 	// USubsystem interface
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -43,11 +48,19 @@ public:
 	void RegisterDirectionalWind(UWindFieldDirectionalComponent* Component);
 	void UnregisterDirectionalWind(UWindFieldDirectionalComponent* Component);
 
+	void RegisterConfigComponent(UWindFieldConfigComponent* Component);
+	void UnregisterConfigComponent(UWindFieldConfigComponent* Component);
+
 	// --- Configuration ---
 
-	/** Wind field GPU configuration */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field")
+	/** Active wind field configuration (loaded from Project Settings, overridable per-level) */
 	FWindFieldConfig WindFieldConfig;
+
+	/** Re-evaluate the active config: use level-placed config component if present, else Project Settings default. */
+	void ApplyWindFieldConfig();
+
+	/** Called when Project Settings change in the editor */
+	void LoadGlobalWindFieldConfig(const UWindSystemSettings* Settings, EPropertyChangeType::Type ChangeType);
 
 	// --- CPU sampling (fallback for AI / character movement) ---
 
@@ -64,6 +77,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UWindFieldDirectionalComponent> DirectionalWindComponent;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UWindFieldConfigComponent>> RegisteredConfigComponents;
 
 	/** Collect wind source data and push to render thread */
 	void UpdateWindField();

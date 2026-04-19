@@ -37,7 +37,7 @@ public:
 	float InnerRadius = 0.0f;
 
 	/** Falloff exponent */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "0"))
 	float FalloffExponent = 1.5f;
 
 	/** Half-height of the cylinder along the forward axis (cm) */
@@ -50,4 +50,5 @@ public:
 
 	virtual EWindFieldSourceType GetWindType() const override { return EWindFieldSourceType::Cylinder; }
 	virtual FGPUWindSourceData ToGPUData() const override;
+	virtual void DrawDebug(float Lifetime = 0.0f) const override;
 };

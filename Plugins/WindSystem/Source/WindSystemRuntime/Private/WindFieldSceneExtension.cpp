@@ -18,12 +18,6 @@ static TAutoConsoleVariable<int32> CVarWindFieldDebugSlice(
 	TEXT("Enable wind field 3D slice debug visualization (0 = off, 1 = on)"),
 	ECVF_RenderThreadSafe);
 
-static TAutoConsoleVariable<float> CVarWindFieldDebugVelocityScale(
-	TEXT("r.WindField.DebugVelocityScale"),
-	0.01f,
-	TEXT("Velocity scale for wind field debug visualization"),
-	ECVF_RenderThreadSafe);
-
 IMPLEMENT_SCENE_EXTENSION(FWindFieldSceneExtension);
 
 // ============================================================================
@@ -453,7 +447,6 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		DebugParams->VolumeResY = Res.Y;
 		DebugParams->VolumeResZ = Res.Z;
 		DebugParams->SliceCols = SliceCols;
-		DebugParams->VelocityScale = CVarWindFieldDebugVelocityScale.GetValueOnRenderThread();
 		DebugParams->Padding0 = 0;
 		DebugParams->Padding1 = 0;
 		DebugParams->Padding2 = 0;

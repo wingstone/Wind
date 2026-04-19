@@ -206,7 +206,6 @@ class FWindFieldDebugSliceCS : public FGlobalShader
 		SHADER_PARAMETER(uint32, VolumeResY)
 		SHADER_PARAMETER(uint32, VolumeResZ)
 		SHADER_PARAMETER(uint32, SliceCols)
-		SHADER_PARAMETER(float, VelocityScale)
 		SHADER_PARAMETER(uint32, Padding0)
 		SHADER_PARAMETER(uint32, Padding1)
 		SHADER_PARAMETER(uint32, Padding2)

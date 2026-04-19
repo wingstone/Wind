@@ -32,9 +32,10 @@ public:
 	float InnerRadius = 50.0f;
 
 	/** Falloff exponent (1 = linear, 2 = quadratic, etc.) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "0"))
 	float FalloffExponent = 2.0f;
 
 	virtual EWindFieldSourceType GetWindType() const override { return EWindFieldSourceType::Point; }
 	virtual FGPUWindSourceData ToGPUData() const override;
+	virtual void DrawDebug(float Lifetime = 0.0f) const override;
 };

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
 #include "WindFieldTypes.h"
+#include "DrawDebugHelpers.h"
 #include "WindFieldSourceComponent.generated.h"
 
 class UWindSubsystem;
@@ -29,6 +30,11 @@ public:
 
 	/** Get the wind source type */
 	virtual EWindFieldSourceType GetWindType() const PURE_VIRTUAL(UWindFieldSourceComponent::GetWindType, return EWindFieldSourceType::Directional;);
+
+	/** Draw debug visualization of the wind source's area of effect */
+	virtual void DrawDebug(float Lifetime = 0.0f) const {};
+
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
 	virtual void OnRegister() override;

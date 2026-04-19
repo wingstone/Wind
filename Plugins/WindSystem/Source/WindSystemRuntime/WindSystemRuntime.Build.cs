@@ -8,6 +8,7 @@ public class WindSystemRuntime : ModuleRules
 	public WindSystemRuntime(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		PrivatePCHHeaderFile = "WindSystemRuntimePCH.h";
 
 		// Access Renderer private/internal headers for Scene Extension API
 		PrivateIncludePaths.Add(Path.Combine(EngineDirectory, "Source", "Runtime", "Renderer", "Private"));
@@ -18,6 +19,7 @@ public class WindSystemRuntime : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"DeveloperSettings",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

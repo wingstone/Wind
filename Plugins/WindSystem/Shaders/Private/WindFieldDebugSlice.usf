@@ -15,7 +15,6 @@ uint   VolumeResX;
 uint   VolumeResY;
 uint   VolumeResZ;
 uint   SliceCols;       // number of columns in the atlas grid
-float  VelocityScale;   // multiply velocity for visibility (default ~0.01)
 uint   Padding0;
 uint   Padding1;
 uint   Padding2;
@@ -66,18 +65,14 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Visualize: encode velocity direction & magnitude as color
 	float3 Vel = WindValue.xyz;
 	float Speed = length(Vel);
-	float ScaledSpeed = saturate(Speed * VelocityScale);
 
 	// Map velocity to color:
 	//   R = positive X (+forward), G = positive Y (+right), B = positive Z (+up)
 	//   Negative components go darker.  Background is black = no wind.
 	float3 Color;
-	Color.r = saturate(Vel.x * VelocityScale * 0.5 + 0.5);
-	Color.g = saturate(Vel.y * VelocityScale * 0.5 + 0.5);
-	Color.b = saturate(Vel.z * VelocityScale * 0.5 + 0.5);
-
-	// Boost saturation by mixing with speed-based brightness
-	Color = lerp(Color, float3(ScaledSpeed, ScaledSpeed * 0.6, ScaledSpeed * 0.2), 0.3);
+	Color.r = saturate(Vel.x * 0.5 + 0.5);
+	Color.g = saturate(Vel.y * 0.5 + 0.5);
+	Color.b = saturate(Vel.z * 0.5 + 0.5);
 
 	OutputAtlas[DispatchThreadId.xy] = float4(Color, 1.0);
 }

@@ -3,6 +3,7 @@
 #include "Fluid2DGlobalFlowComponent.h"
 #include "Fluid2DSubsystem.h"
 #include "Engine/Texture2D.h"
+#include "TextureResource.h"
 #include "Engine/World.h"
 
 UFluid2DGlobalFlowComponent::UFluid2DGlobalFlowComponent()

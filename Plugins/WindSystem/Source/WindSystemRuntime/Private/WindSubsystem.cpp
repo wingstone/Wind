@@ -3,10 +3,13 @@
 #include "WindSubsystem.h"
 #include "WindFieldSourceComponent.h"
 #include "WindFieldDirectionalComponent.h"
+#include "WindFieldConfigComponent.h"
+#include "WindSystemSettings.h"
 #include "WindFieldTypes.h"
 #include "WindFieldSceneExtension.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "SceneInterface.h"
@@ -19,9 +22,19 @@ DEFINE_LOG_CATEGORY_STATIC(LogWindSystem, Log, All);
 // USubsystem interface
 // ============================================================================
 
+UWindSubsystem::UWindSubsystem()
+{
+#if WITH_EDITOR
+	UWindSystemSettings::OnSettingsChange.AddUObject(this, &UWindSubsystem::LoadGlobalWindFieldConfig);
+#endif
+}
+
 void UWindSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+	const UWindSystemSettings* Settings = UWindSystemSettings::Get();
+	WindFieldConfig = Settings->DefaultWindFieldConfig;
 
 	UE_LOG(LogWindSystem, Log, TEXT("WindSubsystem initialized - Resolution: %dx%dx%d, WorldExtent: %.0fx%.0fx%.0f"),
 		WindFieldConfig.Resolution.X, WindFieldConfig.Resolution.Y, WindFieldConfig.Resolution.Z,
@@ -31,6 +44,7 @@ void UWindSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UWindSubsystem::Deinitialize()
 {
 	RegisteredSources.Empty();
+	RegisteredConfigComponents.Empty();
 	DirectionalWindComponent = nullptr;
 	Super::Deinitialize();
 }
@@ -84,6 +98,46 @@ void UWindSubsystem::UnregisterDirectionalWind(UWindFieldDirectionalComponent* C
 	if (DirectionalWindComponent == Component)
 	{
 		DirectionalWindComponent = nullptr;
+	}
+}
+
+void UWindSubsystem::RegisterConfigComponent(UWindFieldConfigComponent* Component)
+{
+	if (Component)
+	{
+		RegisteredConfigComponents.AddUnique(Component);
+	}
+}
+
+void UWindSubsystem::UnregisterConfigComponent(UWindFieldConfigComponent* Component)
+{
+	RegisteredConfigComponents.Remove(Component);
+}
+
+void UWindSubsystem::ApplyWindFieldConfig()
+{
+	if (RegisteredConfigComponents.Num() > 0)
+	{
+		WindFieldConfig = RegisteredConfigComponents[0]->GetWindFieldConfig();
+	}
+	else
+	{
+		WindFieldConfig = UWindSystemSettings::Get()->DefaultWindFieldConfig;
+	}
+
+	UE_LOG(LogWindSystem, Log, TEXT("WindFieldConfig applied - Resolution: %dx%dx%d, WorldExtent: %.0fx%.0fx%.0f"),
+		WindFieldConfig.Resolution.X, WindFieldConfig.Resolution.Y, WindFieldConfig.Resolution.Z,
+		WindFieldConfig.WorldExtent.X, WindFieldConfig.WorldExtent.Y, WindFieldConfig.WorldExtent.Z);
+}
+
+void UWindSubsystem::LoadGlobalWindFieldConfig(const UWindSystemSettings* Settings, EPropertyChangeType::Type ChangeType)
+{
+	// Only apply project settings if there is no per-level override
+	if (RegisteredConfigComponents.Num() == 0)
+	{
+		WindFieldConfig = Settings->DefaultWindFieldConfig;
+
+		UE_LOG(LogWindSystem, Log, TEXT("WindFieldConfig loaded from Project Settings"));
 	}
 }
 

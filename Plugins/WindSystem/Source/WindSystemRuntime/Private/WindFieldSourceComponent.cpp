@@ -6,12 +6,25 @@
 
 UWindFieldSourceComponent::UWindFieldSourceComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = true;
 	bAutoActivate = true;
 	SetIsReplicatedByDefault(false);
 
 #if WITH_EDITORONLY_DATA
 	bVisualizeComponent = true;
+#endif
+}
+
+void UWindFieldSourceComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+#if WITH_EDITOR
+	if (GetWorld())
+	{
+		DrawDebug();
+	}
 #endif
 }
 

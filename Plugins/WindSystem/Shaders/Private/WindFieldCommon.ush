@@ -58,7 +58,7 @@ float3 ComputePointWind(FGPUWindSource Source, float3 WorldPos, float Time)
 	{
 		NormalizedDist = saturate((Distance - Source.InnerRadius) / RadiusRange);
 	}
-	float Attenuation = pow(1.0 - NormalizedDist, Source.FalloffExponent);
+	float Attenuation = pow(max(0.00001, 1.0 - NormalizedDist), Source.FalloffExponent);
 
 	return Dir * Source.Strength * Attenuation;
 }
@@ -124,7 +124,7 @@ float3 ComputeCylinderWind(FGPUWindSource Source, float3 WorldPos, float Time)
 	if (LocalRadius > InnerR)
 	{
 		float NormDist = saturate((RadialDist - InnerR) / (LocalRadius - InnerR));
-		RadialAtten = pow(1.0 - NormDist, Source.FalloffExponent);
+		RadialAtten = pow(max(0.00001, 1.0 - NormDist), Source.FalloffExponent);
 	}
 
 	// Axial edge fade (smooth near caps)

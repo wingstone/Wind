@@ -7,6 +7,7 @@ public class Wind : ModuleRules
 	public Wind(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		PrivatePCHHeaderFile = "WindPCH.h";
 
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core",
