@@ -227,3 +227,37 @@ class FWindFieldDebugSliceCS : public FGlobalShader
 		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZE_2D"), 8);
 	}
 };
+
+// ============================================================================
+// Scroll: shift 3D wind field volume by integer texel offset
+// ============================================================================
+
+class FWindFieldScrollCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FWindFieldScrollCS);
+	SHADER_USE_PARAMETER_STRUCT(FWindFieldScrollCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(uint32, ResolutionX)
+		SHADER_PARAMETER(uint32, ResolutionY)
+		SHADER_PARAMETER(uint32, ResolutionZ)
+		SHADER_PARAMETER(int32, ScrollOffsetX)
+		SHADER_PARAMETER(int32, ScrollOffsetY)
+		SHADER_PARAMETER(int32, ScrollOffsetZ)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, SourceVolume)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float4>, DestVolume)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZE"), 8);
+	}
+};

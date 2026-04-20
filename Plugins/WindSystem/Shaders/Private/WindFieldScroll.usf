@@ -1,0 +1,42 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+/*=============================================================================
+	WindFieldScroll.usf: Scroll 3D wind field volume when grid origin moves
+	
+	Copies texture data with an integer texel offset in 3D, zeroing newly
+	exposed regions where no source data exists.
+=============================================================================*/
+
+#include "/Engine/Private/Common.ush"
+
+#if !defined(THREADGROUP_SIZE)
+#define THREADGROUP_SIZE 8
+#endif
+
+uint ResolutionX;
+uint ResolutionY;
+uint ResolutionZ;
+int ScrollOffsetX;
+int ScrollOffsetY;
+int ScrollOffsetZ;
+Texture3D SourceVolume;
+RWTexture3D<float4> DestVolume;
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, THREADGROUP_SIZE)]
+void ScrollVolumeCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int3 Coord = int3(DispatchThreadId);
+	if (Coord.x >= (int)ResolutionX || Coord.y >= (int)ResolutionY || Coord.z >= (int)ResolutionZ)
+		return;
+
+	int3 Src = Coord + int3(ScrollOffsetX, ScrollOffsetY, ScrollOffsetZ);
+
+	if (all(Src >= 0) && Src.x < (int)ResolutionX && Src.y < (int)ResolutionY && Src.z < (int)ResolutionZ)
+	{
+		DestVolume[Coord] = SourceVolume[Src];
+	}
+	else
+	{
+		DestVolume[Coord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+	}
+}

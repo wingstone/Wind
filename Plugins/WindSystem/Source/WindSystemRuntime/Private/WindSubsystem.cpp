@@ -52,6 +52,7 @@ void UWindSubsystem::Deinitialize()
 void UWindSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	UpdateScroll();
 	UpdateWindField();
 }
 
@@ -148,6 +149,67 @@ FWindFieldSceneExtension* UWindSubsystem::GetSceneExtension() const
 		return GetWorld()->Scene->GetRenderScene()->GetExtensionPtr<FWindFieldSceneExtension>();
 	}
 	return nullptr;
+}
+
+// ============================================================================
+// Scroll — quantize camera movement and push texel offset to render thread
+// ============================================================================
+
+void UWindSubsystem::UpdateScroll()
+{
+	if (!GetWorld() || !GetWorld()->Scene)
+	{
+		return;
+	}
+
+	const FVector ScrollTargetLocation = GetFieldCenterPosition();
+	const FIntVector ScrollTargetLocationInt = FIntVector(
+		FMath::RoundToInt(ScrollTargetLocation.X),
+		FMath::RoundToInt(ScrollTargetLocation.Y),
+		FMath::RoundToInt(ScrollTargetLocation.Z));
+
+	const FIntVector ViewDelta = ScrollTargetLocationInt - LastScrollTargetLocation;
+	const int32 MaxOffset = FMath::Max3(
+		FMath::Abs(ViewDelta.X),
+		FMath::Abs(ViewDelta.Y),
+		FMath::Abs(ViewDelta.Z));
+
+	// Trigger scroll when camera moves more than 25% of the smallest world extent axis
+	const float ScrollThreshold = FMath::Min3(
+		static_cast<float>(WindFieldConfig.WorldExtent.X),
+		static_cast<float>(WindFieldConfig.WorldExtent.Y),
+		static_cast<float>(WindFieldConfig.WorldExtent.Z)) * 0.25f;
+
+	if (MaxOffset > ScrollThreshold)
+	{
+		const FIntVector Res(
+			FMath::Max(WindFieldConfig.Resolution.X, 1),
+			FMath::Max(WindFieldConfig.Resolution.Y, 1),
+			FMath::Max(WindFieldConfig.Resolution.Z, 1));
+		const FVector CellSize(
+			WindFieldConfig.WorldExtent.X / static_cast<double>(Res.X),
+			WindFieldConfig.WorldExtent.Y / static_cast<double>(Res.Y),
+			WindFieldConfig.WorldExtent.Z / static_cast<double>(Res.Z));
+
+		const FIntVector GridScrollOffset = FIntVector(
+			FMath::RoundToInt32(ViewDelta.X / CellSize.X),
+			FMath::RoundToInt32(ViewDelta.Y / CellSize.Y),
+			FMath::RoundToInt32(ViewDelta.Z / CellSize.Z));
+
+		ENQUEUE_RENDER_COMMAND(WindField_ScrollOffset)(
+			[WorldScene = GetWorld()->Scene, GridScrollOffset](FRHICommandListImmediate& RHICmdList)
+			{
+				if (WorldScene->GetRenderScene())
+				{
+					if (FWindFieldSceneExtension* Ext = WorldScene->GetRenderScene()->GetExtensionPtr<FWindFieldSceneExtension>())
+					{
+						Ext->SetScrollOffset_RenderThread(GridScrollOffset);
+					}
+				}
+			});
+
+		LastScrollTargetLocation = ScrollTargetLocationInt;
+	}
 }
 
 // ============================================================================

@@ -32,12 +32,15 @@ bool FWindFieldSceneExtension::ShouldCreateExtension(FScene& Scene)
 FWindFieldSceneExtension::FWindFieldSceneExtension(FScene& InScene)
 	: ISceneExtension(InScene)
 {
+	WorldGridCenter = FVector3f::ZeroVector;
+	GridScrollOffset = FIntVector::ZeroValue;
 }
 
 FWindFieldSceneExtension::~FWindFieldSceneExtension()
 {
 	WindFieldRT[0].SafeRelease();
 	WindFieldRT[1].SafeRelease();
+	TempWindFieldRT.SafeRelease();
 	DebugSliceRT.SafeRelease();
 }
 
@@ -77,9 +80,82 @@ void FWindFieldSceneExtension::SetSourceData_RenderThread(
 	bNeedsUpdate = true;
 }
 
+void FWindFieldSceneExtension::SetScrollOffset_RenderThread(const FIntVector& NewGridScrollOffset)
+{
+	check(IsInRenderingThread());
+	GridScrollOffset = NewGridScrollOffset;
+}
+
 // ============================================================================
 // FUpdater — dispatch wind field compute shader
 // ============================================================================
+
+void FWindFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder)
+{
+	check(IsInRenderingThread());
+
+	const FWindFieldConfig& Config = SceneData->CurrentConfig;
+	const FIntVector Res(
+		FMath::Max(Config.Resolution.X, 1),
+		FMath::Max(Config.Resolution.Y, 1),
+		FMath::Max(Config.Resolution.Z, 1));
+	const FVector3f CellSize(
+		static_cast<float>(Config.WorldExtent.X) / static_cast<float>(Res.X),
+		static_cast<float>(Config.WorldExtent.Y) / static_cast<float>(Res.Y),
+		static_cast<float>(Config.WorldExtent.Z) / static_cast<float>(Res.Z));
+
+	FIntVector TexelOffset = SceneData->GridScrollOffset;
+
+	if (TexelOffset.X == 0 && TexelOffset.Y == 0 && TexelOffset.Z == 0)
+	{
+		return;
+	}
+
+	// Update world grid origin by the quantized amount
+	SceneData->WorldGridCenter += FVector3f(
+		static_cast<float>(TexelOffset.X) * CellSize.X,
+		static_cast<float>(TexelOffset.Y) * CellSize.Y,
+		static_cast<float>(TexelOffset.Z) * CellSize.Z);
+	SceneData->GridScrollOffset = FIntVector::ZeroValue;
+
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneData->Scene.GetFeatureLevel());
+	const FIntVector GroupCount(
+		FMath::DivideAndRoundUp(Res.X, 8),
+		FMath::DivideAndRoundUp(Res.Y, 8),
+		FMath::DivideAndRoundUp(Res.Z, 8));
+
+	const TShaderMapRef<FWindFieldScrollCS> ScrollCS(GlobalShaderMap);
+
+	// Scroll both double-buffered wind field textures
+	for (int32 i = 0; i < 2; i++)
+	{
+		if (!SceneData->WindFieldRT[i] || !SceneData->TempWindFieldRT) continue;
+
+		FRDGTextureRef Source = GraphBuilder.RegisterExternalTexture(SceneData->WindFieldRT[i]);
+		FRDGTextureRef Dest = GraphBuilder.RegisterExternalTexture(SceneData->TempWindFieldRT);
+
+		FWindFieldScrollCS::FParameters* Params = GraphBuilder.AllocParameters<FWindFieldScrollCS::FParameters>();
+		Params->ResolutionX = Res.X;
+		Params->ResolutionY = Res.Y;
+		Params->ResolutionZ = Res.Z;
+		Params->ScrollOffsetX = TexelOffset.X;
+		Params->ScrollOffsetY = TexelOffset.Y;
+		Params->ScrollOffsetZ = TexelOffset.Z;
+		Params->SourceVolume = GraphBuilder.CreateSRV(Source);
+		Params->DestVolume = GraphBuilder.CreateUAV(Dest);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("WindField.Scroll_%d", i),
+			ERDGPassFlags::Compute,
+			ScrollCS,
+			Params,
+			GroupCount);
+
+		// Swap so WindFieldRT[i] now points to the scrolled result
+		Swap(SceneData->WindFieldRT[i], SceneData->TempWindFieldRT);
+	}
+}
 
 void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 	FRDGBuilder& GraphBuilder,
@@ -109,6 +185,19 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 				SceneData->WindFieldRT[i],
 				i == 0 ? TEXT("WindFieldRT_0") : TEXT("WindFieldRT_1"));
 		}
+	}
+
+	// Ensure temporary volume for scroll copy exists
+	if (!SceneData->TempWindFieldRT)
+	{
+		GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, Desc,
+			SceneData->TempWindFieldRT, TEXT("TempWindFieldRT"));
+	}
+
+	// Apply pending scroll before simulation
+	if (SceneData->GridScrollOffset != FIntVector::ZeroValue)
+	{
+		ApplyScroll_RenderThread(GraphBuilder);
 	}
 
 	if (!SceneData->bNeedsUpdate || (SceneData->CurrentSources.Num() == 0 && !SceneData->DirectionalData.IsValid()))
@@ -165,7 +254,8 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		TShaderMapRef<FWindFieldAdvectionCS> AdvectionShader(ShaderMap);
 
 		FWindFieldAdvectionCS::FParameters* Params = GraphBuilder.AllocParameters<FWindFieldAdvectionCS::FParameters>();
-		Params->FieldOrigin = SceneData->FieldCenter - FVector3f(Config.WorldExtent) * 0.5f;
+		const FVector3f FieldOrigin = SceneData->WorldGridCenter - FVector3f(Config.WorldExtent) * 0.5f;
+		Params->FieldOrigin = FieldOrigin;
 		Params->Time = SceneData->CurrentTime;
 		Params->FieldExtent = FVector3f(Config.WorldExtent);
 		Params->Dissipation = ClampedDissipation;
@@ -173,7 +263,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		Params->ResolutionY = Res.Y;
 		Params->ResolutionZ = Res.Z;
 		Params->DeltaTime = SceneData->DeltaTime;
-		Params->PrevFieldOrigin = SceneData->PrevFieldCenter - FVector3f(Config.WorldExtent) * 0.5f;
+		Params->PrevFieldOrigin = FieldOrigin;
 		Params->Padding0 = 0.0f;
 		Params->PrevField = GraphBuilder.CreateSRV(PrevWindFieldTex);
 		Params->PrevFieldSampler = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
@@ -244,7 +334,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		TShaderMapRef<FWindFieldForceCS> ForceShader(ShaderMap);
 
 		FWindFieldForceCS::FParameters* Params = GraphBuilder.AllocParameters<FWindFieldForceCS::FParameters>();
-		Params->FieldOrigin = SceneData->FieldCenter - FVector3f(Config.WorldExtent) * 0.5f;
+		Params->FieldOrigin = SceneData->WorldGridCenter - FVector3f(Config.WorldExtent) * 0.5f;
 		Params->Time = SceneData->CurrentTime;
 		Params->FieldExtent = FVector3f(Config.WorldExtent);
 		Params->SourceCount = SourceCount;
@@ -325,7 +415,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 				OutputTex = ((Iter % 2) == 0) ? DiffPing : DiffPong;
 
 			FWindFieldDiffusionCS::FParameters* Params = GraphBuilder.AllocParameters<FWindFieldDiffusionCS::FParameters>();
-			Params->FieldOrigin = SceneData->FieldCenter - FVector3f(Config.WorldExtent) * 0.5f;
+			Params->FieldOrigin = SceneData->WorldGridCenter - FVector3f(Config.WorldExtent) * 0.5f;
 			Params->DeltaTime = SceneData->DeltaTime;
 			Params->FieldExtent = FVector3f(Config.WorldExtent);
 			Params->Viscosity = Config.Viscosity;
@@ -359,7 +449,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		const FWindDirectionalData& DirData = SceneData->DirectionalData;
 
 		FWindFieldComposeCS::FParameters* Params = GraphBuilder.AllocParameters<FWindFieldComposeCS::FParameters>();
-		Params->FieldOrigin = SceneData->FieldCenter - FVector3f(Config.WorldExtent) * 0.5f;
+		Params->FieldOrigin = SceneData->WorldGridCenter - FVector3f(Config.WorldExtent) * 0.5f;
 		Params->Time = SceneData->CurrentTime;
 		Params->FieldExtent = FVector3f(Config.WorldExtent);
 		Params->Padding0 = 0.0f;
@@ -539,7 +629,7 @@ void FWindFieldSceneExtension::FRenderer::UpdateSceneUniformBuffer(
 	FWindFieldParameters Params;
 	const FWindFieldConfig& Config = SceneData->CurrentConfig;
 
-	FVector3f Origin = SceneData->FieldCenter - FVector3f(Config.WorldExtent) * 0.5f;
+	FVector3f Origin = SceneData->WorldGridCenter - FVector3f(Config.WorldExtent) * 0.5f;
 	FVector3f InvExtent(
 		1.0f / FMath::Max((float)Config.WorldExtent.X, 1.0f),
 		1.0f / FMath::Max((float)Config.WorldExtent.Y, 1.0f),

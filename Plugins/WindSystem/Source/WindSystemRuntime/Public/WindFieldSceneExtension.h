@@ -44,6 +44,9 @@ public:
 		virtual void PostSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePostUpdateChangeSet& ChangeSet) override;
 
 	private:
+		/** Shift wind field volume data by integer texel offset, zeroing newly exposed regions */
+		void ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder);
+
 		FWindFieldSceneExtension* SceneData;
 	};
 
@@ -83,12 +86,18 @@ public:
 		const FWindFieldConfig& InConfig,
 		const FWindDirectionalData& InDirectionalData);
 
+	/** Set the pending scroll offset (in texels) from the game thread */
+	void SetScrollOffset_RenderThread(const FIntVector& NewGridScrollOffset);
+
 private:
 
 	// --- GPU Resources (render thread owned) ---
 	/** Double-buffered wind field textures for temporal blending */
 	TRefCountPtr<IPooledRenderTarget> WindFieldRT[2];
 	int32 CurrentRTIndex = 0;
+
+	/** Temporary volume for scroll copy (swap target) */
+	TRefCountPtr<IPooledRenderTarget> TempWindFieldRT;
 
 	// --- Current frame data (render thread) ---
 	TArray<FGPUWindSourceData> CurrentSources;
@@ -99,6 +108,12 @@ private:
 	FWindFieldConfig CurrentConfig;
 	FWindDirectionalData DirectionalData;
 	bool bNeedsUpdate = false;
+
+	// --- Scroll tracking (render thread) ---
+	/** Quantized world-space center of the grid (updated by scroll) */
+	FVector3f WorldGridCenter = FVector3f::ZeroVector;
+	/** Pending scroll offset in texels, consumed by ApplyScroll_RenderThread */
+	FIntVector GridScrollOffset = FIntVector::ZeroValue;
 
 	// --- Debug Slice Atlas (enabled via r.WindField.DebugSlice CVar) ---
 	TRefCountPtr<IPooledRenderTarget> DebugSliceRT;

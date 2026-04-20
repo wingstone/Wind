@@ -31,3 +31,9 @@ IMPLEMENT_GLOBAL_SHADER(
 	"/Plugin/WindSystem/Private/WindFieldDebugSlice.usf",
 	"MainCS",
 	SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(
+	FWindFieldScrollCS,
+	"/Plugin/WindSystem/Private/WindFieldScroll.usf",
+	"ScrollVolumeCS",
+	SF_Compute);

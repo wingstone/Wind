@@ -81,8 +81,14 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UWindFieldConfigComponent>> RegisteredConfigComponents;
 
+	/** Last quantized scroll target location (integer world units) */
+	FIntVector LastScrollTargetLocation = FIntVector::ZeroValue;
+
 	/** Collect wind source data and push to render thread */
 	void UpdateWindField();
+
+	/** Check camera movement and push scroll offset to render thread if needed */
+	void UpdateScroll();
 
 	/** Get the camera/player position for field centering */
 	FVector GetFieldCenterPosition() const;
