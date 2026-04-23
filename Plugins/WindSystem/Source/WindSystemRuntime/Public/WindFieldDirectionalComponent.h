@@ -51,8 +51,8 @@ public:
 	TObjectPtr<UTexture2D> WindNoiseTexture = nullptr;
 
 	/** Tiling scale for the noise texture in world space (smaller = more repetition) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Directional Wind|Noise Texture", meta = (ClampMin = "0.01", UIMax = "100"))
-	float WindNoiseTiling = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Directional Wind|Noise Texture", meta = (ClampMin = "0.0", UIMax = "100"))
+	float WindNoiseTiling = 0.001f;
 
 	/** Minimum wind intensity multiplier (when noise = 0) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Directional Wind|Noise Texture", meta = (ClampMin = "0", UIMax = "2"))

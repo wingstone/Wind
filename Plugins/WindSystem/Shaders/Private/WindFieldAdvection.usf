@@ -63,7 +63,7 @@ float3 GetDirectionalWindVelocity(float3 WorldPos)
 	if (bHasDirectionalNoise > 0)
 	{
 		float2 NoiseUV = WorldPos.xy * DirNoiseTiling 
-		               + DirectionalWindDirection.xy * DirNoiseScrollSpeed * Time;
+		               - DirectionalWindDirection.xy * DirNoiseScrollSpeed * Time;
 		float NoiseSample = DirectionalNoiseTexture.SampleLevel(DirectionalNoiseSampler, NoiseUV, 0).r;
 		float Modulation = lerp(DirNoiseIntensityMin, DirNoiseIntensityMax, NoiseSample);
 		DirWind *= Modulation * DirectionalNoiseStrength;

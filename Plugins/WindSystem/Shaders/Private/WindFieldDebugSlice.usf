@@ -66,13 +66,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float3 Vel = WindValue.xyz;
 	float Speed = length(Vel);
 
-	// Map velocity to color:
-	//   R = positive X (+forward), G = positive Y (+right), B = positive Z (+up)
-	//   Negative components go darker.  Background is black = no wind.
-	float3 Color;
-	Color.r = saturate(Vel.x * 0.5 + 0.5);
-	Color.g = saturate(Vel.y * 0.5 + 0.5);
-	Color.b = saturate(Vel.z * 0.5 + 0.5);
-
-	OutputAtlas[DispatchThreadId.xy] = float4(Color, 1.0);
+	OutputAtlas[DispatchThreadId.xy] = float4(Vel, Speed);
 }

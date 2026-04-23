@@ -76,8 +76,8 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Noise texture spatial modulation
 	if (bHasDirectionalNoise > 0)
 	{
-		float2 NoiseUV = WorldPos.xy * DirNoiseTiling * 0.0001
-		               + DirectionalWindDirection.xy * DirNoiseScrollSpeed * Time * 0.0001;
+		float2 NoiseUV = WorldPos.xy * DirNoiseTiling
+		               - DirectionalWindDirection.xy * DirNoiseScrollSpeed * Time ;
 		float NoiseSample = DirectionalNoiseTexture.SampleLevel(DirectionalNoiseSampler, NoiseUV, 0).r;
 		float Modulation = lerp(DirNoiseIntensityMin, DirNoiseIntensityMax, NoiseSample);
 		DirWind *= Modulation * DirectionalNoiseStrength;

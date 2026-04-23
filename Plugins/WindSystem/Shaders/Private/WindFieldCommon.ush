@@ -68,25 +68,27 @@ float3 ComputeVortexWind(FGPUWindSource Source, float3 WorldPos, float Time)
 {
 	float3 Delta = WorldPos - Source.Position;
 	float HorizDist = length(Delta.xy);
+	float Distance = length(Delta);
 
 	if (HorizDist > Source.Radius || HorizDist < 0.001)
 		return float3(0, 0, 0);
 
 	// Tangential direction (perpendicular to radius in XY plane)
-	float3 Tangent = float3(-Delta.y, 0, Delta.x) / HorizDist;
-
+	float3 Tangent = float3(-Delta.y, Delta.x, 0) / HorizDist;
+	
 	// Outer falloff
-	float NormalizedDist = saturate(HorizDist / Source.Radius);
-	float OuterFade = 1.0 - NormalizedDist;
+	float NormalizedDist = 0;
+	float RadiusRange = Source.Radius - Source.InnerRadius;
+	if (RadiusRange > 0)
+	{
+		NormalizedDist = saturate((Distance - Source.InnerRadius) / RadiusRange);
+	}
+	float OuterFade = pow(max(0.00001, 1.0 - NormalizedDist), Source.FalloffExponent);
 
 	// Inner dead zone fade-in
 	float InnerFade = saturate(HorizDist / max(Source.InnerRadius, 1.0));
 
-	// Vertical falloff
-	float VertDist = abs(Delta.y);
-	float VertFade = saturate(1.0 - VertDist / (Source.Radius * 0.5));
-
-	return Tangent * Source.Strength * OuterFade * InnerFade * VertFade;
+	return Tangent * Source.Strength * OuterFade * InnerFade;
 }
 
 /** Cylinder / Cone wind — pushes along axis within a tapered tube.
@@ -118,6 +120,9 @@ float3 ComputeCylinderWind(FGPUWindSource Source, float3 WorldPos, float Time)
 	if (RadialDist > LocalRadius)
 		return float3(0, 0, 0);
 
+	float3 OutDir = Axis * 2.0 * HH + (Source.EndRadius - Source.Radius)* normalize(RadialVec);
+	float3 WindDir = lerp(Axis, OutDir, (RadialDist - Source.InnerRadius) / max(LocalRadius - Source.InnerRadius, 0.001));
+
 	// Radial falloff (inner → outer)
 	float RadialAtten = 1.0;
 	float InnerR = min(Source.InnerRadius, LocalRadius);
@@ -130,5 +135,5 @@ float3 ComputeCylinderWind(FGPUWindSource Source, float3 WorldPos, float Time)
 	// Axial edge fade (smooth near caps)
 	float EdgeFade = 1.0 - smoothstep(0.85, 1.0, abs(AxisDist) / HH);
 
-	return Axis * Source.Strength * RadialAtten * EdgeFade;
+	return WindDir * Source.Strength * RadialAtten * EdgeFade;
 }
