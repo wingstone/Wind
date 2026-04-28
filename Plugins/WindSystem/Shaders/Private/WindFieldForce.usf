@@ -73,5 +73,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		TotalForce += WindContribution;
 	}
 
-	OutputField[DispatchThreadId] = float4(TotalForce, 0.0);
+	OutputField[DispatchThreadId] += float4(TotalForce, 0.0);
 }

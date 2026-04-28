@@ -568,8 +568,6 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		SceneData->DebugSliceRT.SafeRelease();
 	}
 
-	// Flip double buffer for next frame
-	SceneData->CurrentRTIndex = ReadIdx;
 	SceneData->bNeedsUpdate = false;
 }
 
