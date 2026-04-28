@@ -33,8 +33,8 @@ public:
 	float InnerRadius = 50.0f;
 
 	/** Falloff exponent */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "0"))
-	float FalloffExponent = 1.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Source", meta = (ClampMin = "0.001"))
+	float FalloffExponent = 1.0f;
 
 	virtual EWindFieldSourceType GetWindType() const override { return EWindFieldSourceType::Vortex; }
 	virtual FGPUWindSourceData ToGPUData() const override;

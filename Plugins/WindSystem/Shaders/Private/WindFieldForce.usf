@@ -2,11 +2,6 @@
 //
 // WindFieldForce.usf — External force injection pass.
 //
-// Reads the advected field and adds point/vortex wind source contributions.
-// Directional wind is handled separately in the advection and composition passes.
-//
-// Input:  AdvectedField (output of advection pass)
-// Output: Advected field + injected forces
 
 #include "/Engine/Private/Common.ush"
 #include "WindFieldCommon.ush"
@@ -29,9 +24,6 @@ float  Padding1;
 float  Padding2;
 
 StructuredBuffer<FGPUWindSource> WindSources;
-
-Texture3D<float4> AdvectedField;
-SamplerState AdvectedFieldSampler;
 
 RWTexture3D<float4> OutputField;
 
@@ -56,9 +48,6 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float3 Resolution = float3(ResolutionX, ResolutionY, ResolutionZ);
 	float3 UVW = (float3(DispatchThreadId) + 0.5) / Resolution;
 	float3 WorldPos = FieldOrigin + UVW * FieldExtent;
-
-	// Read advected field at this texel
-	float4 Advected = AdvectedField.SampleLevel(AdvectedFieldSampler, UVW, 0);
 
 	// Accumulate external forces from point/vortex wind sources
 	float3 TotalForce = float3(0, 0, 0);

@@ -57,7 +57,7 @@ struct WINDSYSTEMRUNTIME_API FWindFieldConfig
 
 	/** Resolution of the 3D wind field texture (texels per axis) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field")
-	FIntVector Resolution = FIntVector(64, 64, 32);
+	FIntVector Resolution = FIntVector(64, 64, 64);
 
 	/** World-space extent of the wind field volume (cm), centered on the camera */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field")
@@ -65,13 +65,17 @@ struct WINDSYSTEMRUNTIME_API FWindFieldConfig
 
 	/** Viscosity coefficient for diffusion (higher = smoother, more viscous wind).
 	 *  Controls the strength of the Laplacian smoothing term. Keep below 0.15 for stability. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field", meta = (ClampMin = "0", ClampMax = "0.15"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field", meta = (ClampMin = "0", UIMin = "0", UIMax = "100000"))
 	float Viscosity = 0.05f;
 
 	/** Dissipation factor per frame (lower = faster energy decay, 1.0 = no decay).
 	 *  At steady state the wind velocity equals the source's contribution. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field", meta = (ClampMin = "0.8", ClampMax = "1.0"))
 	float Dissipation = 0.98f;
+
+	/** Simulation time step (seconds) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wind Field", meta = (ClampMin = "0.0", ClampMax = "0.1"))
+	float TimeStep = 0.016f;
 
 	/** Diffusion solver method.
 	 *  Finite Difference: explicit forward Euler, fast but needs small Viscosity (< 0.1).

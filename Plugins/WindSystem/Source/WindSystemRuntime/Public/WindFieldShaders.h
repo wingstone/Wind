@@ -84,8 +84,6 @@ class FWindFieldForceCS : public FGlobalShader
 		SHADER_PARAMETER(float, Padding1)
 		SHADER_PARAMETER(float, Padding2)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUWindSource>, WindSources)
-		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, AdvectedField)
-		SHADER_PARAMETER_SAMPLER(SamplerState, AdvectedFieldSampler)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float4>, OutputField)
 	END_SHADER_PARAMETER_STRUCT()
 

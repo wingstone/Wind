@@ -55,7 +55,7 @@ void UWindFieldVortexComponent::DrawDebug(float Lifetime) const
 
 		// Build radial direction perpendicular to UpAxis
 		FVector Right = FVector::CrossProduct(UpAxis, FMath::Abs(UpAxis.Z) < 0.99f ? FVector::UpVector : FVector::RightVector).GetSafeNormal();
-		FVector Forward = FVector::CrossProduct(Right, UpAxis).GetSafeNormal();
+		FVector Forward = -FVector::CrossProduct(Right, UpAxis).GetSafeNormal();
 
 		FVector Dir0 = (Right * FMath::Cos(Angle0) + Forward * FMath::Sin(Angle0));
 		FVector Dir1 = (Right * FMath::Cos(Angle1) + Forward * FMath::Sin(Angle1));

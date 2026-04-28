@@ -41,6 +41,7 @@ FWindFieldSceneExtension::~FWindFieldSceneExtension()
 	WindFieldRT[0].SafeRelease();
 	WindFieldRT[1].SafeRelease();
 	TempWindFieldRT.SafeRelease();
+	OutWindFieldRT.SafeRelease();
 	DebugSliceRT.SafeRelease();
 }
 
@@ -74,7 +75,7 @@ void FWindFieldSceneExtension::SetSourceData_RenderThread(
 	PrevFieldCenter = FieldCenter;
 	FieldCenter = InCenter;
 	CurrentTime = InTime;
-	DeltaTime = InDeltaTime;
+	DeltaTime = InConfig.TimeStep;
 	CurrentConfig = InConfig;
 	DirectionalData = InDirectionalData;
 	bNeedsUpdate = true;
@@ -194,6 +195,12 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 			SceneData->TempWindFieldRT, TEXT("TempWindFieldRT"));
 	}
 
+	if (!SceneData->OutWindFieldRT)
+	{
+		GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, Desc,
+			SceneData->OutWindFieldRT, TEXT("OutWindFieldRT"));
+	}
+
 	// Apply pending scroll before simulation
 	if (SceneData->GridScrollOffset != FIntVector::ZeroValue)
 	{
@@ -220,8 +227,6 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		PF_FloatRGBA,
 		FClearValueBinding::Black,
 		TexCreate_ShaderResource | TexCreate_UAV);
-	FRDGTextureRef AdvectedTex = GraphBuilder.CreateTexture(IntermediateDesc, TEXT("WindField.Advected"));
-	FRDGTextureRef ForcedTex = GraphBuilder.CreateTexture(IntermediateDesc, TEXT("WindField.Forced"));
 
 	const bool bHasDirectionalWind = SceneData->DirectionalData.IsValid();
 
@@ -248,7 +253,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 	// ====================================================================
 	// Pass 1: Advection — semi-Lagrangian backtrace
 	// Input:  PrevWindFieldTex (previous frame)
-	// Output: AdvectedTex
+	// Output: WindFieldTex
 	// ====================================================================
 	{
 		TShaderMapRef<FWindFieldAdvectionCS> AdvectionShader(ShaderMap);
@@ -267,7 +272,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		Params->Padding0 = 0.0f;
 		Params->PrevField = GraphBuilder.CreateSRV(PrevWindFieldTex);
 		Params->PrevFieldSampler = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-		Params->OutputField = GraphBuilder.CreateUAV(AdvectedTex);
+		Params->OutputField = GraphBuilder.CreateUAV(WindFieldTex);
 
 		// Bind directional wind (additive advection velocity)
 		const FWindDirectionalData& DirData = SceneData->DirectionalData;
@@ -327,8 +332,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 
 	// ====================================================================
 	// Pass 2: Force Injection — point/vortex wind sources
-	// Input:  AdvectedTex (output of advection)
-	// Output: ForcedTex
+	// Output: WindFieldTex
 	// ====================================================================
 	{
 		TShaderMapRef<FWindFieldForceCS> ForceShader(ShaderMap);
@@ -347,9 +351,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		Params->Padding1 = 0.0f;
 		Params->Padding2 = 0.0f;
 		Params->WindSources = GraphBuilder.CreateSRV(SourceBuffer);
-		Params->AdvectedField = GraphBuilder.CreateSRV(AdvectedTex);
-		Params->AdvectedFieldSampler = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-		Params->OutputField = GraphBuilder.CreateUAV(ForcedTex);
+		Params->OutputField = GraphBuilder.CreateUAV(WindFieldTex);
 
 		FComputeShaderUtils::AddPass(
 			GraphBuilder,
@@ -360,22 +362,12 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 			GroupCount);
 	}
 
-	// Diffusion outputs to DiffusedTex when composition is needed, else directly to WindFieldTex
-	FRDGTextureRef DiffusedTex = nullptr;
-	FRDGTextureRef DiffusionOutputTarget;
-	if (bHasDirectionalWind)
-	{
-		DiffusedTex = GraphBuilder.CreateTexture(IntermediateDesc, TEXT("WindField.Diffused"));
-		DiffusionOutputTarget = DiffusedTex;
-	}
-	else
-	{
-		DiffusionOutputTarget = WindFieldTex;
-	}
+	SceneData->CurrentRTIndex = 1 - SceneData->CurrentRTIndex; // Swap read/write for next processing stage.
+	FRDGTextureRef DiffusionOutputTarget = GraphBuilder.RegisterExternalTexture(SceneData->WindFieldRT[SceneData->CurrentRTIndex]);
 
 	// ====================================================================
 	// Pass 3: Diffusion
-	// Input:  ForcedTex (output of force injection)
+	// Input:  WindFieldTex (output of force injection)
 	// Output: DiffusionOutputTarget
 	// Jacobi method iterates multiple times with ping-pong textures.
 	// ====================================================================
@@ -400,10 +392,10 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		{
 			const bool bLastIter = (Iter == NumIterations - 1);
 
-			// Determine input: first iteration reads ForcedTex, subsequent iterations read previous output
+			// Determine input: first iteration reads WindFieldTex, subsequent iterations read previous output
 			FRDGTextureRef InputTex;
 			if (Iter == 0)
-				InputTex = ForcedTex;
+				InputTex = WindFieldTex;
 			else
 				InputTex = ((Iter % 2) == 1) ? DiffPing : DiffPong;
 
@@ -437,12 +429,15 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		}
 	}
 
+	SceneData->CurrentRTIndex = 1 - SceneData->CurrentRTIndex; // Swap read/write for next processing stage.
+
 	// ====================================================================
 	// Pass 4: Composition — add directional wind to final output
 	// Input:  DiffusedTex (simulation result)
-	// Output: WindFieldTex (final double-buffered RT)
+	// Output: OutWindFieldTex (final output texture)
 	// Only dispatched when directional wind is active.
 	// ====================================================================
+	FRDGTextureRef OutWindFieldTex = GraphBuilder.RegisterExternalTexture(SceneData->OutWindFieldRT);
 	if (bHasDirectionalWind)
 	{
 		TShaderMapRef<FWindFieldComposeCS> ComposeShader(ShaderMap);
@@ -483,9 +478,9 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		}
 		Params->Padding2 = 0.0f;
 
-		Params->SimulationField = GraphBuilder.CreateSRV(DiffusedTex);
+		Params->SimulationField = GraphBuilder.CreateSRV(DiffusionOutputTarget);
 		Params->SimulationFieldSampler = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-		Params->OutputField = GraphBuilder.CreateUAV(WindFieldTex);
+		Params->OutputField = GraphBuilder.CreateUAV(OutWindFieldTex);
 
 		FComputeShaderUtils::AddPass(
 			GraphBuilder,
@@ -495,9 +490,17 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 			Params,
 			GroupCount);
 	}
-
+	else
+	{
+		// If no directional wind, just copy diffused result to output
+		AddCopyTexturePass(
+			GraphBuilder,
+			DiffusionOutputTarget,
+			GraphBuilder.RegisterExternalTexture(SceneData->OutWindFieldRT));
+	}
+	
 	// Mark texture as globally readable for subsequent passes and material sampling
-	GraphBuilder.UseExternalAccessMode(WindFieldTex, ERHIAccess::SRVMask, ERHIPipeline::All);
+	GraphBuilder.UseExternalAccessMode(OutWindFieldTex, ERHIAccess::SRVMask, ERHIPipeline::All);
 
 	// ====================================================================
 	// Debug Pass: 3D Wind Field → 2D Slice Atlas
@@ -540,7 +543,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		DebugParams->Padding0 = 0;
 		DebugParams->Padding1 = 0;
 		DebugParams->Padding2 = 0;
-		DebugParams->WindFieldVolume = GraphBuilder.CreateSRV(WindFieldTex);
+		DebugParams->WindFieldVolume = GraphBuilder.CreateSRV(OutWindFieldTex);
 		DebugParams->WindFieldVolumeSampler = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 		DebugParams->OutputAtlas = GraphBuilder.CreateUAV(DebugAtlasTex);
 
@@ -645,7 +648,7 @@ void FWindFieldSceneExtension::FRenderer::UpdateSceneUniformBuffer(
 	if (SceneData->WindFieldRT[ReadIdx])
 	{
 		Params.WindFieldTexture = GraphBuilder.CreateSRV(
-			GraphBuilder.RegisterExternalTexture(SceneData->WindFieldRT[ReadIdx], TEXT("WindField.Current")));
+			GraphBuilder.RegisterExternalTexture(SceneData->OutWindFieldRT, TEXT("WindField.Texture")));
 	}
 	else
 	{

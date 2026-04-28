@@ -99,6 +99,9 @@ private:
 	/** Temporary volume for scroll copy (swap target) */
 	TRefCountPtr<IPooledRenderTarget> TempWindFieldRT;
 
+	/** Output wind field texture */
+	TRefCountPtr<IPooledRenderTarget> OutWindFieldRT;
+
 	// --- Current frame data (render thread) ---
 	TArray<FGPUWindSourceData> CurrentSources;
 	FVector3f FieldCenter = FVector3f::ZeroVector;

@@ -58,7 +58,7 @@ float3 ComputePointWind(FGPUWindSource Source, float3 WorldPos, float Time)
 	{
 		NormalizedDist = saturate((Distance - Source.InnerRadius) / RadiusRange);
 	}
-	float Attenuation = pow(max(0.00001, 1.0 - NormalizedDist), Source.FalloffExponent);
+	float Attenuation = pow(1.0 - NormalizedDist, Source.FalloffExponent);
 
 	return Dir * Source.Strength * Attenuation;
 }
@@ -83,7 +83,7 @@ float3 ComputeVortexWind(FGPUWindSource Source, float3 WorldPos, float Time)
 	{
 		NormalizedDist = saturate((Distance - Source.InnerRadius) / RadiusRange);
 	}
-	float OuterFade = pow(max(0.00001, 1.0 - NormalizedDist), Source.FalloffExponent);
+	float OuterFade = pow(1.0 - NormalizedDist, Source.FalloffExponent);
 
 	// Inner dead zone fade-in
 	float InnerFade = saturate(HorizDist / max(Source.InnerRadius, 1.0));
@@ -120,8 +120,8 @@ float3 ComputeCylinderWind(FGPUWindSource Source, float3 WorldPos, float Time)
 	if (RadialDist > LocalRadius)
 		return float3(0, 0, 0);
 
-	float3 OutDir = Axis * 2.0 * HH + (Source.EndRadius - Source.Radius)* normalize(RadialVec);
-	float3 WindDir = lerp(Axis, OutDir, (RadialDist - Source.InnerRadius) / max(LocalRadius - Source.InnerRadius, 0.001));
+	float3 OutDir = normalize(Axis * 2.0 * HH + (Source.EndRadius - Source.Radius)* normalize(RadialVec));
+	float3 WindDir = lerp(Axis, OutDir, saturate((RadialDist - Source.InnerRadius) / max(LocalRadius - Source.InnerRadius, 0.001)));
 
 	// Radial falloff (inner → outer)
 	float RadialAtten = 1.0;
