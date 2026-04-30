@@ -14,6 +14,7 @@ enum class EWindFieldSourceType : uint8
 	Point       = 1 UMETA(DisplayName = "Point"),
 	Vortex      = 2 UMETA(DisplayName = "Vortex"),
 	Cylinder    = 3 UMETA(DisplayName = "Cylinder"),
+	CapsuleInteractive = 4 UMETA(DisplayName = "Capsule Interactive"),
 };
 
 /** Diffusion solver method */
@@ -41,8 +42,8 @@ struct FGPUWindSourceData
 	uint32    WindType;          //  4 bytes  offset 40
 	float     HalfHeight;        //  4 bytes  offset 44  (Cylinder/Cone)
 	float     EndRadius;         //  4 bytes  offset 48  (Cylinder/Cone top radius)
-	float     Padding3;     //  4 bytes  offset 52
-	float     Padding4;    //  4 bytes  offset 56
+	float     Padding3;          //  4 bytes  offset 52  (CapsuleInteractive: AngularVelocity.Y)
+	float     Padding4;          //  4 bytes  offset 56  (CapsuleInteractive: AngularVelocity.Z)
 	float     Padding;           //  4 bytes  offset 60
 	// Total: 64 bytes
 };

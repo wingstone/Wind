@@ -12,6 +12,7 @@ UWindFieldDirectionalComponent::UWindFieldDirectionalComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
 	bAutoActivate = true;
+	bTickInEditor = true;
 	SetIsReplicatedByDefault(false);
 
 #if WITH_EDITORONLY_DATA

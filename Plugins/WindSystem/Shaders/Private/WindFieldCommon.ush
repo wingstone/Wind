@@ -29,6 +29,7 @@ struct FGPUWindSource
 #define WIND_TYPE_POINT       1
 #define WIND_TYPE_VORTEX      2
 #define WIND_TYPE_CYLINDER    3
+#define WIND_TYPE_CAPSULE_INTERACTIVE 4
 
 // ============================================================================
 // Per-source wind contribution functions
@@ -136,4 +137,37 @@ float3 ComputeCylinderWind(FGPUWindSource Source, float3 WorldPos, float Time)
 	float EdgeFade = 1.0 - smoothstep(0.85, 1.0, abs(AxisDist) / HH);
 
 	return WindDir * Source.Strength * RadialAtten * EdgeFade;
+}
+
+/** Capsule interactive wind driven by transform motion.
+ *  Payload mapping for this type:
+ *  - linear velocity: (Strength, InnerRadius, FalloffExponent)
+ *  - angular velocity: (EndRadius, NoiseStrength, Padding3)
+ *  - influence falloff exponent: Padding
+ */
+float3 ComputeCapsuleInteractiveWind(FGPUWindSource Source, float3 WorldPos, float Time)
+{
+	float3 Axis = normalize(Source.Direction);
+	float Radius = max(Source.Radius, 1.0);
+	float HalfHeight = max(Source.HalfHeight, Radius);
+	float SegmentHalfLen = max(HalfHeight - Radius, 0.0);
+
+	float3 Delta = WorldPos - Source.Position;
+	float AxisT = clamp(dot(Delta, Axis), -SegmentHalfLen, SegmentHalfLen);
+	float3 Closest = Source.Position + Axis * AxisT;
+	float3 Radial = WorldPos - Closest;
+	float Dist = length(Radial);
+
+	if (Dist > Radius)
+		return float3(0, 0, 0);
+
+	float FalloffExponent = max(Source.Padding, 0.001);
+	float Atten = pow(saturate(1.0 - Dist / Radius), FalloffExponent);
+
+	float3 LinearVelocity = float3(Source.Strength, Source.InnerRadius, Source.FalloffExponent);
+	float3 AngularVelocity = float3(Source.EndRadius, Source.NoiseStrength, Source.Padding3);
+	float3 Relative = WorldPos - Source.Position;
+	float3 LocalVelocity = LinearVelocity + cross(AngularVelocity, Relative);
+
+	return LocalVelocity * Atten;
 }

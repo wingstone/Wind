@@ -370,6 +370,30 @@ FWindSample UWindSubsystem::SampleWindAtLocation(FVector WorldPosition) const
 			}
 			break;
 		}
+		case EWindFieldSourceType::CapsuleInteractive:
+		{
+			const FVector3f Axis = GPUData.Direction.GetSafeNormal();
+			const float R = FMath::Max(GPUData.Radius, 1.0f);
+			const float HH = FMath::Max(GPUData.HalfHeight, R);
+			const float SegmentHalfLen = FMath::Max(HH - R, 0.0f);
+
+			const FVector3f Delta = Pos - GPUData.Position;
+			const float AxisT = FMath::Clamp(FVector3f::DotProduct(Delta, Axis), -SegmentHalfLen, SegmentHalfLen);
+			const FVector3f Closest = GPUData.Position + Axis * AxisT;
+			const FVector3f ToSurface = Pos - Closest;
+			const float Dist = ToSurface.Length();
+
+			if (Dist <= R)
+			{
+				const float Atten = FMath::Pow(FMath::Clamp(1.0f - Dist / R, 0.0f, 1.0f), FMath::Max(GPUData.Padding, 0.001f));
+				const FVector3f LinearVel(GPUData.Strength, GPUData.InnerRadius, GPUData.FalloffExponent);
+				const FVector3f AngularVel(GPUData.EndRadius, GPUData.Padding3, GPUData.Padding4);
+				const FVector3f LocalVel = LinearVel + FVector3f::CrossProduct(AngularVel, Pos - GPUData.Position);
+				Result.WindVelocity += FVector(LocalVel * Atten);
+			}
+
+			break;
+		}
 		default:
 			break;
 		}
