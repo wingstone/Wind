@@ -1,0 +1,7 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+// This template file is required so FNiagaraCompileHashVisitor::UpdateShaderFile
+// finds a real .ush at /Plugin/WindSystem/Private/NiagaraDataInterfaceWindField.ush.
+// The actual DI functions are generated inline via GetParameterDefinitionHLSL /
+// GetFunctionHLSL, so this file only needs to exist for hash tracking.
+
+#pragma once

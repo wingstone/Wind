@@ -11,7 +11,7 @@
 class FFluid2DFieldSceneExtension;
 class UFluid2DInteractionComponent;
 class UFluid2DFluidConfigComponent;
-class UFluid2DGlobalFlowComponent;
+class AFluid2DFlowVolume;
 class UFluid2DSystemSettings;
 
 /**
@@ -48,22 +48,40 @@ public:
 	void RegisterFluidConfigComponent(UFluid2DFluidConfigComponent* Component);
 	void UnregisterFluidConfigComponent(UFluid2DFluidConfigComponent* Component);
 
-	void RegisterGlobalFlowComponent(UFluid2DGlobalFlowComponent* Component);
-	void UnregisterGlobalFlowComponent(UFluid2DGlobalFlowComponent* Component);
-	
+	void InsertFlowVolume(AFluid2DFlowVolume* Volume);
+	void RemoveFlowVolume(AFluid2DFlowVolume* Volume);
+
+	/**
+	 * Sample the flow velocity at a world-space location (CPU-side approximation).
+	 * Uses the same priority-first + BlendRadius blend as the render-thread flow, but
+	 * substitutes the mean of FlowNoiseIntensityMin/Max for the noise texture value
+	 * since we do not sample the noise texture on the CPU.
+	 * Returns FVector2D::ZeroVector when no volume affects the point.
+	 */
+	FVector2D GetFlowVelocityAt(const FVector& WorldPos) const;
+
 	FFluid2DFieldSceneExtension* GetSceneExtension() const;
-	
+
 private:
-	
+
 	UPROPERTY()
 	TArray<TObjectPtr<UFluid2DInteractionComponent>> RegisteredInteractionComponents;
 	UPROPERTY()
 	TArray<TObjectPtr<UFluid2DFluidConfigComponent>> RegisteredFluidConfigComponents;
 	UPROPERTY()
-	TArray<TObjectPtr<UFluid2DGlobalFlowComponent>> RegisteredGlobalFlowComponents;
+	TArray<TObjectPtr<AFluid2DFlowVolume>> FlowVolumes;
 
 	FIntVector2 LastScrollTargetLocationInt = FIntVector2::ZeroValue;
-	
+
+	/** Compute the world-space location the simulation is sampling around this frame (player pawn / camera / last rendered view). */
+	FVector GetSampleLocation() const;
+
+	/**
+	 * Resolve the flow volume that should drive the flow at WorldPos.
+	 * Returns the winning volume (or nullptr) and the blend weight in [0, 1].
+	 */
+	AFluid2DFlowVolume* ResolveFlowVolumeAt(const FVector& WorldPos, float& OutBlendWeight) const;
+
 	void ScrollWorldGrid();
 
 	/** Update fluid configuration on render thread */

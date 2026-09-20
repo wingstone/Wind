@@ -168,6 +168,20 @@ void UWindSubsystem::UpdateScroll()
 		FMath::RoundToInt(ScrollTargetLocation.Y),
 		FMath::RoundToInt(ScrollTargetLocation.Z));
 
+	// Seed the scroll baseline on the first frame we get a valid, non-zero
+	// target so we do not treat the player's spawn distance from the world
+	// origin as a scroll delta. Without this the first non-zero tick emits a
+	// scroll offset of ~PlayerLocation and pushes the volume off by that much.
+	if (!bScrollBaselineInitialized)
+	{
+		if (!ScrollTargetLocation.IsZero())
+		{
+			LastScrollTargetLocation = ScrollTargetLocationInt;
+			bScrollBaselineInitialized = true;
+		}
+		return;
+	}
+
 	const FIntVector ViewDelta = ScrollTargetLocationInt - LastScrollTargetLocation;
 	const int32 MaxOffset = FMath::Max3(
 		FMath::Abs(ViewDelta.X),
@@ -223,6 +237,21 @@ void UWindSubsystem::UpdateWindField()
 		return;
 	}
 
+	// --- Diagnostic heartbeat (once per second) ---
+	{
+		static double LastLogTime = 0.0;
+		const double Now = FPlatformTime::Seconds();
+		if (Now - LastLogTime > 1.0)
+		{
+			int32 ActiveCount = 0;
+			for (const UWindFieldSourceComponent* S : RegisteredSources)
+			{
+				if (S && S->IsActive()) { ++ActiveCount; }
+			}
+			LastLogTime = Now;
+		}
+	}
+
 	// Collect directional wind data (static, separate from fluid sources)
 	FWindDirectionalData DirectionalData;
 	if (DirectionalWindComponent && DirectionalWindComponent->IsWindEnabled())
@@ -271,13 +300,13 @@ FVector UWindSubsystem::GetFieldCenterPosition() const
 	{
 		if (const APlayerController* PC = World->GetFirstPlayerController())
 		{
-			if (PC->PlayerCameraManager)
-			{
-				return PC->PlayerCameraManager->GetCameraLocation();
-			}
 			if (const APawn* Pawn = PC->GetPawn())
 			{
 				return Pawn->GetActorLocation();
+			}
+			if (PC->PlayerCameraManager)
+			{
+				return PC->PlayerCameraManager->GetCameraLocation();
 			}
 		}
 

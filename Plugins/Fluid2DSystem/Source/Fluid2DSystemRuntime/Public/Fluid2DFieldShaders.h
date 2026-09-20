@@ -212,6 +212,7 @@ class FFluid2DInteractionApplicationCS : public FGlobalShader
 		SHADER_PARAMETER(uint32, InteractionShapeType)
 		SHADER_PARAMETER(uint32, InteractionEmissionTypeMask)
 		SHADER_PARAMETER(FVector2f, InteractionPosition)
+		SHADER_PARAMETER(FVector2f, InteractionPrevPosition)
 		SHADER_PARAMETER(FVector2f, InteractionDirection)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, HeightField)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, VelocityField)

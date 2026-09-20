@@ -36,10 +36,10 @@ public:
 		FUpdater(FFluid2DFieldSceneExtension* InExtension) : SceneData(InExtension) {}
 
 		//~ Begin ISceneExtensionUpdater Interface.
-		virtual void PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms) override;
+		virtual void PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet) override;
 		virtual void PostSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePostUpdateChangeSet& ChangeSet) override;
 		//~ End ISceneExtensionUpdater Interface.
-
+ 
 		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder);
 		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder);
 		void ExecuteMaskAccumulateSolver_RenderThread(FRDGBuilder& GraphBuilder);

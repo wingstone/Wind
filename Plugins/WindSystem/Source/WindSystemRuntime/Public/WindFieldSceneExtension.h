@@ -40,12 +40,16 @@ public:
 	public:
 		FUpdater(FWindFieldSceneExtension* InExtension) : SceneData(InExtension) {}
 
-		virtual void PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms) override;
+		virtual void PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet) override;
 		virtual void PostSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePostUpdateChangeSet& ChangeSet) override;
 
 	private:
-		/** Shift wind field volume data by integer texel offset, zeroing newly exposed regions */
-		void ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder);
+		/**
+		 * Shift wind field volume data by integer texel offset, zeroing newly exposed regions.
+		 * Reads from InField and writes the scrolled result into a transient texture, which is returned.
+		 * Returns InField unchanged when there is no pending scroll offset.
+		 */
+		FRDGTextureRef ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder, FRDGTextureRef InField, const FRDGTextureDesc& TransientDesc);
 
 		FWindFieldSceneExtension* SceneData;
 	};
@@ -89,17 +93,33 @@ public:
 	/** Set the pending scroll offset (in texels) from the game thread */
 	void SetScrollOffset_RenderThread(const FIntVector& NewGridScrollOffset);
 
+	/**
+	 * Render-thread snapshot for external consumers (e.g. Niagara Data Interface).
+	 * OutTexture is null if no frame has been produced yet.
+	 * Origin / InvExtent are in world space; multiply (WorldPos - Origin) * InvExtent to get UVW.
+	 */
+	WINDSYSTEMRUNTIME_API void GetRenderState_RenderThread(
+		FRHITexture*& OutTexture,
+		FVector3f& OutOrigin,
+		FVector3f& OutInvExtent,
+		FVector3f& OutDirectionalDirection,
+		float& OutDirectionalStrength) const;
+
 private:
 
 	// --- GPU Resources (render thread owned) ---
-	/** Double-buffered wind field textures for temporal blending */
-	TRefCountPtr<IPooledRenderTarget> WindFieldRT[2];
-	int32 CurrentRTIndex = 0;
+	/**
+	 * Persistent simulation state — diffused result from the previous frame,
+	 * BEFORE directional-wind composition. Serves as the "previous frame" input
+	 * for temporal advection, keeping the compose overlay out of the feedback loop.
+	 */
+	TRefCountPtr<IPooledRenderTarget> PrevSimulationRT;
 
-	/** Temporary volume for scroll copy (swap target) */
-	TRefCountPtr<IPooledRenderTarget> TempWindFieldRT;
-
-	/** Output wind field texture */
+	/**
+	 * Persistent final output — diffused result WITH directional-wind composition
+	 * overlay. This is the texture materials sample via the Scene Uniform Buffer.
+	 * Every other RT used by the simulation is allocated transiently per-frame.
+	 */
 	TRefCountPtr<IPooledRenderTarget> OutWindFieldRT;
 
 	// --- Current frame data (render thread) ---
@@ -115,6 +135,8 @@ private:
 	// --- Scroll tracking (render thread) ---
 	/** Quantized world-space center of the grid (updated by scroll) */
 	FVector3f WorldGridCenter = FVector3f::ZeroVector;
+	/** Whether WorldGridCenter has been seeded from the first incoming field center */
+	bool bGridCenterInitialized = false;
 	/** Pending scroll offset in texels, consumed by ApplyScroll_RenderThread */
 	FIntVector GridScrollOffset = FIntVector::ZeroValue;
 

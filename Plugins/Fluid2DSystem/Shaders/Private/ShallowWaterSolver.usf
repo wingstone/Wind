@@ -157,7 +157,7 @@ void DiffusionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 }
 
 Texture2D HeightField;
-RWTexture2D<float2> OutNormalField;
+RWTexture2D<float3> OutNormalField;
 
 float SampleNormalHeight(int2 Coord)
 {
@@ -173,6 +173,7 @@ void HeightToNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	if (Coord.x >= GridSize || Coord.y >= GridSize)
 		return;
 
+	float HeightCenter = SampleNormalHeight(Coord);
 	float HeightLeft = SampleNormalHeight(Coord + int2(-1, 0));
 	float HeightRight = SampleNormalHeight(Coord + int2(1, 0));
 	float HeightDown = SampleNormalHeight(Coord + int2(0, -1));
@@ -182,5 +183,15 @@ void HeightToNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float Dhdy = (HeightUp - HeightDown) / (2.0 * CellSize);
 
 	float3 NormalWS = normalize(float3(-Dhdx, -Dhdy, 1.0));
-	OutNormalField[Coord] = NormalWS.xy;
+
+	// Discrete Laplacian in world units: ∇²h ≈ (h_L + h_R + h_U + h_D - 4 h_C) / CellSize^2.
+	// At wave crests (local maxima) this is negative; foam accumulates on cresting peaks, so we
+	// write the peak-positive form -∇²h clamped to non-negative. The target format is R11G11B10F
+	// (unsigned) so we cannot store the signed value directly. Materials should sample .b as
+	// a foam mask and remap / scale as needed.
+	float Laplacian = (HeightLeft + HeightRight + HeightUp + HeightDown - 4.0 * HeightCenter) / (CellSize * CellSize);
+	float FoamCurvature = max(0.0, -Laplacian);
+
+	// R11G11B10F is unsigned; pack signed normal xy into [0, 1] range. Consumers decode via xy * 2 - 1.
+	OutNormalField[Coord] = float3(NormalWS.xy * 0.5 + 0.5, FoamCurvature);
 }

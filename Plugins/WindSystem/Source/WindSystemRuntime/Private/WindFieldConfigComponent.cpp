@@ -3,6 +3,9 @@
 #include "WindFieldConfigComponent.h"
 #include "WindSubsystem.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogWindConfig, Log, All);
 
 UWindFieldConfigComponent::UWindFieldConfigComponent()
 {
@@ -35,10 +38,21 @@ void UWindFieldConfigComponent::PostEditChangeProperty(FPropertyChangedEvent& Pr
 
 void UWindFieldConfigComponent::RegisterWithSubsystem()
 {
+	UWorld* World = GetWorld();
+	UE_LOG(LogWindConfig, Warning, TEXT("[WindConfig] Register attempt: Owner=%s World=%s WorldType=%d"),
+		*GetNameSafe(GetOwner()),
+		*GetNameSafe(World),
+		World ? (int32)World->WorldType : -1);
+
 	if (UWindSubsystem* Subsystem = GetWindSubsystem())
 	{
 		Subsystem->RegisterConfigComponent(this);
 		Subsystem->ApplyWindFieldConfig();
+		UE_LOG(LogWindConfig, Warning, TEXT("[WindConfig]   -> registered OK"));
+	}
+	else
+	{
+		UE_LOG(LogWindConfig, Warning, TEXT("[WindConfig]   -> NO SUBSYSTEM"));
 	}
 }
 
@@ -48,6 +62,7 @@ void UWindFieldConfigComponent::UnregisterFromSubsystem()
 	{
 		Subsystem->UnregisterConfigComponent(this);
 		Subsystem->ApplyWindFieldConfig();
+		UE_LOG(LogWindConfig, Warning, TEXT("[WindConfig] Unregistered: Owner=%s"), *GetNameSafe(GetOwner()));
 	}
 }
 

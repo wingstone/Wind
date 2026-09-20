@@ -84,6 +84,9 @@ private:
 	/** Last quantized scroll target location (integer world units) */
 	FIntVector LastScrollTargetLocation = FIntVector::ZeroValue;
 
+	/** Whether LastScrollTargetLocation has been seeded from a valid non-zero view */
+	bool bScrollBaselineInitialized = false;
+
 	/** Collect wind source data and push to render thread */
 	void UpdateWindField();
 

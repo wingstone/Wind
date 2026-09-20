@@ -27,6 +27,7 @@ float InteractionHeightIntensity;
 int InteractionShapeType;
 int InteractionEmissionTypeMask;
 float2 InteractionPosition;
+float2 InteractionPrevPosition;
 float2 InteractionDirection;
 RWTexture2D<float> HeightField;
 RWTexture2D<float2> VelocityField;
@@ -36,18 +37,33 @@ float2 GridToWorld(int2 Coord)
 	return Coord * CellSize + GridOrigin;
 }
 
+/** Closest point on segment [A,B] to P (returns the point and its parametric t in [0,1]). */
+float2 ClosestPointOnSegment(float2 P, float2 A, float2 B, out float OutT)
+{
+	float2 AB = B - A;
+	float LenSq = dot(AB, AB);
+	float T = (LenSq > 1e-8f) ? saturate(dot(P - A, AB) / LenSq) : 0.0f;
+	OutT = T;
+	return A + AB * T;
+}
+
 [numthreads(THREAD_GROUP_SIZE, THREAD_GROUP_SIZE, 1)]
 void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	int2 Coord = int2(DispatchThreadId.xy);
-	
+
 	if (Coord.x >= GridSize || Coord.y >= GridSize)
 		return;
 
+	float2 WorldPos = GridToWorld(Coord);
+
+	// Reference center used by omni / vortex (Capsule uses the closest point on the swept segment
+	// so it stays coherent with disk / ring which just use InteractionPosition).
+	float2 ReferenceCenter = InteractionPosition;
 	float Falloff = 0.0f;
+
 	if (InteractionShapeType == 1) // Disk
 	{
-		float2 WorldPos = GridToWorld(Coord);
 		float Distance = length(WorldPos - InteractionPosition);
 		if (Distance < InteractionRadius)
 		{
@@ -56,7 +72,6 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 	else if (InteractionShapeType == 2) // Ring
 	{
-		float2 WorldPos = GridToWorld(Coord);
 		float DistanceToCenter = length(WorldPos - InteractionPosition);
 		if (DistanceToCenter < InteractionRadius + InteractionRadiusWidth
 			&& DistanceToCenter > InteractionRadius - InteractionRadiusWidth)
@@ -66,6 +81,18 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			float Distance = max(OutDistance, InDistance);
 			Falloff = pow(Distance / InteractionRadius, InteractionPowerFalloff);
 		}
+	}
+	else if (InteractionShapeType == 4) // Capsule (swept disk between PrevPosition and Position)
+	{
+		float SegT;
+		float2 Closest = ClosestPointOnSegment(WorldPos, InteractionPrevPosition, InteractionPosition, SegT);
+		float Distance = length(WorldPos - Closest);
+		if (Distance < InteractionRadius)
+		{
+			// Same falloff shape as Disk so a stationary capsule (Prev == Cur) matches Disk exactly.
+			Falloff = pow(Distance / InteractionRadius, InteractionPowerFalloff);
+		}
+		ReferenceCenter = Closest;
 	}
 
 	float Height = InteractionHeightIntensity * Falloff;
@@ -79,13 +106,13 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 	if (InteractionEmissionTypeMask & 0x2) // Omni
 	{
-		float2 OmniDirection = GridToWorld(Coord) - InteractionPosition;
+		float2 OmniDirection = WorldPos - ReferenceCenter;
 		OmniDirection = normalize(OmniDirection);
 		Velocity += OmniDirection * InteractionOmniStrength * Falloff;
 	}
 	if (InteractionEmissionTypeMask & 0x4) // Vortex
 	{
-		float2 ToCenter = InteractionPosition - GridToWorld(Coord);
+		float2 ToCenter = ReferenceCenter - WorldPos;
 		float2 TangentialDir = float2(-ToCenter.y, ToCenter.x);
 		TangentialDir = normalize(TangentialDir);
 		Velocity += TangentialDir * InteractionVortexStrength * Falloff;

@@ -10,6 +10,8 @@
 #include "ShaderParameterUtils.h"
 #include "TextureResource.h"
 
+UE_DISABLE_OPTIMIZATION_SHIP
+
 DEFINE_LOG_CATEGORY_STATIC(LogWindFieldSceneExtension, Log, All);
 
 static TAutoConsoleVariable<int32> CVarWindFieldDebugSlice(
@@ -38,9 +40,7 @@ FWindFieldSceneExtension::FWindFieldSceneExtension(FScene& InScene)
 
 FWindFieldSceneExtension::~FWindFieldSceneExtension()
 {
-	WindFieldRT[0].SafeRelease();
-	WindFieldRT[1].SafeRelease();
-	TempWindFieldRT.SafeRelease();
+	PrevSimulationRT.SafeRelease();
 	OutWindFieldRT.SafeRelease();
 	DebugSliceRT.SafeRelease();
 }
@@ -74,6 +74,42 @@ void FWindFieldSceneExtension::SetSourceData_RenderThread(
 	CurrentSources = InSources;
 	PrevFieldCenter = FieldCenter;
 	FieldCenter = InCenter;
+
+	// Snap the quantized grid center whenever it drifts more than half of the
+	// world extent away from the incoming field center. This covers:
+	//   1) PIE first frames where InCenter is temporarily (0,0,0) (Pawn/Camera
+	//      not ready yet) — we simply do NOT snap, because WorldGridCenter
+	//      already matches the editor-viewport-seeded value.
+	//   2) Packaged / standalone cold start where the player spawns far from
+	//      the world origin — first non-zero InCenter is >HalfExtent away, so
+	//      we snap immediately and the volume covers the player.
+	//   3) Teleports larger than the volume.
+	// Small movements below the threshold are still handled incrementally by
+	// UpdateScroll on the game thread.
+	const FVector3f HalfExtent = FVector3f(InConfig.WorldExtent) * 0.5f;
+	const FVector3f AbsDelta(
+		FMath::Abs(InCenter.X - WorldGridCenter.X),
+		FMath::Abs(InCenter.Y - WorldGridCenter.Y),
+		FMath::Abs(InCenter.Z - WorldGridCenter.Z));
+	if (!bGridCenterInitialized
+		|| AbsDelta.X > HalfExtent.X
+		|| AbsDelta.Y > HalfExtent.Y
+		|| AbsDelta.Z > HalfExtent.Z)
+	{
+		// Only accept a non-zero seed to avoid latching onto an early PIE frame
+		// where the view location is not yet available.
+		if (!InCenter.IsZero())
+		{
+			WorldGridCenter = InCenter;
+			bGridCenterInitialized = true;
+			// A pending scroll offset was computed against the *old*
+			// WorldGridCenter (often 0,0,0) — applying it after we've snapped
+			// would double-count the delta and push the volume past the player.
+			// Discard it; incremental scroll resumes cleanly next frame.
+			GridScrollOffset = FIntVector::ZeroValue;
+		}
+	}
+
 	CurrentTime = InTime;
 	DeltaTime = InConfig.TimeStep;
 	CurrentConfig = InConfig;
@@ -87,11 +123,43 @@ void FWindFieldSceneExtension::SetScrollOffset_RenderThread(const FIntVector& Ne
 	GridScrollOffset = NewGridScrollOffset;
 }
 
+void FWindFieldSceneExtension::GetRenderState_RenderThread(
+	FRHITexture*& OutTexture,
+	FVector3f& OutOrigin,
+	FVector3f& OutInvExtent,
+	FVector3f& OutDirectionalDirection,
+	float& OutDirectionalStrength) const
+{
+	check(IsInRenderingThread());
+
+	OutTexture = OutWindFieldRT ? OutWindFieldRT->GetRHI() : nullptr;
+
+	OutOrigin = WorldGridCenter - FVector3f(CurrentConfig.WorldExtent) * 0.5f;
+	OutInvExtent = FVector3f(
+		1.0f / FMath::Max(static_cast<float>(CurrentConfig.WorldExtent.X), 1.0f),
+		1.0f / FMath::Max(static_cast<float>(CurrentConfig.WorldExtent.Y), 1.0f),
+		1.0f / FMath::Max(static_cast<float>(CurrentConfig.WorldExtent.Z), 1.0f));
+
+	if (DirectionalData.IsValid())
+	{
+		OutDirectionalDirection = DirectionalData.WindDirection;
+		OutDirectionalStrength = DirectionalData.Strength;
+	}
+	else
+	{
+		OutDirectionalDirection = FVector3f::ZeroVector;
+		OutDirectionalStrength = 0.0f;
+	}
+}
+
 // ============================================================================
 // FUpdater — dispatch wind field compute shader
 // ============================================================================
 
-void FWindFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder)
+FRDGTextureRef FWindFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(
+	FRDGBuilder& GraphBuilder,
+	FRDGTextureRef InField,
+	const FRDGTextureDesc& TransientDesc)
 {
 	check(IsInRenderingThread());
 
@@ -109,7 +177,7 @@ void FWindFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder& G
 
 	if (TexelOffset.X == 0 && TexelOffset.Y == 0 && TexelOffset.Z == 0)
 	{
-		return;
+		return InField;
 	}
 
 	// Update world grid origin by the quantized amount
@@ -127,41 +195,32 @@ void FWindFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder& G
 
 	const TShaderMapRef<FWindFieldScrollCS> ScrollCS(GlobalShaderMap);
 
-	// Scroll both double-buffered wind field textures
-	for (int32 i = 0; i < 2; i++)
-	{
-		if (!SceneData->WindFieldRT[i] || !SceneData->TempWindFieldRT) continue;
+	FRDGTextureRef Dest = GraphBuilder.CreateTexture(TransientDesc, TEXT("WindField.Scrolled"));
 
-		FRDGTextureRef Source = GraphBuilder.RegisterExternalTexture(SceneData->WindFieldRT[i]);
-		FRDGTextureRef Dest = GraphBuilder.RegisterExternalTexture(SceneData->TempWindFieldRT);
+	FWindFieldScrollCS::FParameters* Params = GraphBuilder.AllocParameters<FWindFieldScrollCS::FParameters>();
+	Params->ResolutionX = Res.X;
+	Params->ResolutionY = Res.Y;
+	Params->ResolutionZ = Res.Z;
+	Params->ScrollOffsetX = TexelOffset.X;
+	Params->ScrollOffsetY = TexelOffset.Y;
+	Params->ScrollOffsetZ = TexelOffset.Z;
+	Params->SourceVolume = GraphBuilder.CreateSRV(InField);
+	Params->DestVolume = GraphBuilder.CreateUAV(Dest);
 
-		FWindFieldScrollCS::FParameters* Params = GraphBuilder.AllocParameters<FWindFieldScrollCS::FParameters>();
-		Params->ResolutionX = Res.X;
-		Params->ResolutionY = Res.Y;
-		Params->ResolutionZ = Res.Z;
-		Params->ScrollOffsetX = TexelOffset.X;
-		Params->ScrollOffsetY = TexelOffset.Y;
-		Params->ScrollOffsetZ = TexelOffset.Z;
-		Params->SourceVolume = GraphBuilder.CreateSRV(Source);
-		Params->DestVolume = GraphBuilder.CreateUAV(Dest);
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("WindField.Scroll"),
+		ERDGPassFlags::Compute,
+		ScrollCS,
+		Params,
+		GroupCount);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("WindField.Scroll_%d", i),
-			ERDGPassFlags::Compute,
-			ScrollCS,
-			Params,
-			GroupCount);
-
-		// Swap so WindFieldRT[i] now points to the scrolled result
-		Swap(SceneData->WindFieldRT[i], SceneData->TempWindFieldRT);
-	}
+	return Dest;
 }
 
 void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 	FRDGBuilder& GraphBuilder,
-	const FScenePreUpdateChangeSet& ChangeSet,
-	FSceneUniformBuffer& SceneUniforms)
+	const FScenePreUpdateChangeSet& ChangeSet)
 {
 	const FWindFieldConfig& Config = SceneData->CurrentConfig;
 	const FIntVector Res(
@@ -169,7 +228,10 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		FMath::Max(Config.Resolution.Y, 1),
 		FMath::Max(Config.Resolution.Z, 1));
 
-	// Ensure double-buffered 3D wind field textures exist
+	// Persistent RTs:
+	//   - PrevSimulationRT: previous-frame diffused result (no compose overlay), fed back into advection.
+	//   - OutWindFieldRT:   final output with directional-wind compose overlay, sampled by materials.
+	// All other RTs used by the simulation are allocated transiently below.
 	FPooledRenderTargetDesc Desc = FPooledRenderTargetDesc::CreateVolumeDesc(
 		Res.X, Res.Y, Res.Z,
 		PF_FloatRGBA,
@@ -178,55 +240,69 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		TexCreate_ShaderResource | TexCreate_UAV,
 		false);
 
-	for (int32 i = 0; i < 2; ++i)
+	// If a persistent RT was previously created at a stale resolution
+	// (e.g. this pass ran once with a default-constructed CurrentConfig before
+	// SetSourceData_RenderThread delivered the real config), release it so the
+	// pool re-allocates at the correct size. Without this the RT stays at the
+	// first resolution for the entire session — visible as a 64^3 volume in
+	// packaged builds when the intended resolution is 128x128x64.
+	auto ResolutionMatches = [&Res](const TRefCountPtr<IPooledRenderTarget>& RT)
 	{
-		if (!SceneData->WindFieldRT[i])
-		{
-			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, Desc,
-				SceneData->WindFieldRT[i],
-				i == 0 ? TEXT("WindFieldRT_0") : TEXT("WindFieldRT_1"));
-		}
+		if (!RT) { return true; }
+		const FIntVector RTSize = RT->GetDesc().GetSize();
+		return RTSize.X == Res.X && RTSize.Y == Res.Y && RTSize.Z == Res.Z;
+	};
+	if (!ResolutionMatches(SceneData->PrevSimulationRT))
+	{
+		SceneData->PrevSimulationRT.SafeRelease();
+	}
+	if (!ResolutionMatches(SceneData->OutWindFieldRT))
+	{
+		SceneData->OutWindFieldRT.SafeRelease();
 	}
 
-	// Ensure temporary volume for scroll copy exists
-	if (!SceneData->TempWindFieldRT)
+	if (!SceneData->PrevSimulationRT)
 	{
 		GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, Desc,
-			SceneData->TempWindFieldRT, TEXT("TempWindFieldRT"));
+			SceneData->PrevSimulationRT, TEXT("WindField.PrevSimulation"));
 	}
-
 	if (!SceneData->OutWindFieldRT)
 	{
 		GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, Desc,
 			SceneData->OutWindFieldRT, TEXT("OutWindFieldRT"));
 	}
 
-	// Apply pending scroll before simulation
-	if (SceneData->GridScrollOffset != FIntVector::ZeroValue)
-	{
-		ApplyScroll_RenderThread(GraphBuilder);
-	}
-
-	if (!SceneData->bNeedsUpdate || (SceneData->CurrentSources.Num() == 0 && !SceneData->DirectionalData.IsValid()))
-	{
-		return;
-	}
-
-	// Double-buffer: write to current, read previous for temporal blending
-	const int32 WriteIdx = SceneData->CurrentRTIndex;
-	const int32 ReadIdx = 1 - WriteIdx;
-
-	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(SceneData->Scene.GetFeatureLevel());
-
-	FRDGTextureRef WindFieldTex = GraphBuilder.RegisterExternalTexture(SceneData->WindFieldRT[WriteIdx]);
-	FRDGTextureRef PrevWindFieldTex = GraphBuilder.RegisterExternalTexture(SceneData->WindFieldRT[ReadIdx]);
-
-	// Create transient intermediate textures
+	// Transient intermediate texture description reused for all in-flight fields.
 	FRDGTextureDesc IntermediateDesc = FRDGTextureDesc::Create3D(
 		FIntVector(Res.X, Res.Y, Res.Z),
 		PF_FloatRGBA,
 		FClearValueBinding::Black,
 		TexCreate_ShaderResource | TexCreate_UAV);
+
+	// Register the previous-frame simulation state as the advection input.
+	// Diffusion below will overwrite this same pooled RT with the new post-simulation
+	// result, which then becomes next frame's advection input.
+	FRDGTextureRef PrevSimTex = GraphBuilder.RegisterExternalTexture(SceneData->PrevSimulationRT);
+	FRDGTextureRef PrevWindFieldTex = PrevSimTex;
+
+	if (!SceneData->bNeedsUpdate || (SceneData->CurrentSources.Num() == 0 && !SceneData->DirectionalData.IsValid()))
+	{
+		// Skip both scroll and simulation this frame — scroll offset remains pending until the next simulated frame.
+		return;
+	}
+
+	// Apply pending scroll to the previous frame before simulation.
+	if (SceneData->GridScrollOffset != FIntVector::ZeroValue)
+	{
+		PrevWindFieldTex = ApplyScroll_RenderThread(GraphBuilder, PrevWindFieldTex, IntermediateDesc);
+
+	}
+
+	// All simulation intermediates are transient. PrevWindFieldTex (from OutWindFieldRT,
+	// possibly scrolled above) is the previous-frame input for temporal advection.
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(SceneData->Scene.GetFeatureLevel());
+
+	FRDGTextureRef WindFieldTex = GraphBuilder.CreateTexture(IntermediateDesc, TEXT("WindField.Advected"));
 
 	const bool bHasDirectionalWind = SceneData->DirectionalData.IsValid();
 
@@ -362,8 +438,12 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 			GroupCount);
 	}
 
-	SceneData->CurrentRTIndex = 1 - SceneData->CurrentRTIndex; // Swap read/write for next processing stage.
-	FRDGTextureRef DiffusionOutputTarget = GraphBuilder.RegisterExternalTexture(SceneData->WindFieldRT[SceneData->CurrentRTIndex]);
+	// Diffusion writes into the persistent PrevSimulationRT so it can be:
+	//   1) read by the compose pass below to produce the final OutWindFieldRT this frame, and
+	//   2) read by advection as the "previous frame" input next frame.
+	// This is the SAME pooled RT as PrevSimTex above — RDG reorders reads/writes correctly
+	// because advection has already been scheduled to read it before diffusion writes.
+	FRDGTextureRef DiffusionOutputTarget = PrevSimTex;
 
 	// ====================================================================
 	// Pass 3: Diffusion
@@ -429,8 +509,6 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 		}
 	}
 
-	SceneData->CurrentRTIndex = 1 - SceneData->CurrentRTIndex; // Swap read/write for next processing stage.
-
 	// ====================================================================
 	// Pass 4: Composition — add directional wind to final output
 	// Input:  DiffusedTex (simulation result)
@@ -493,10 +571,7 @@ void FWindFieldSceneExtension::FUpdater::PreSceneUpdate(
 	else
 	{
 		// If no directional wind, just copy diffused result to output
-		AddCopyTexturePass(
-			GraphBuilder,
-			DiffusionOutputTarget,
-			GraphBuilder.RegisterExternalTexture(SceneData->OutWindFieldRT));
+		AddCopyTexturePass(GraphBuilder, DiffusionOutputTarget, OutWindFieldTex);
 	}
 	
 	// Mark texture as globally readable for subsequent passes and material sampling
@@ -588,6 +663,8 @@ BEGIN_SHADER_PARAMETER_STRUCT(FWindFieldParameters, WINDSYSTEMRUNTIME_API)
 	SHADER_PARAMETER(float, WindFieldPad0)
 	SHADER_PARAMETER(FVector3f, WindFieldInvExtent)
 	SHADER_PARAMETER(float, WindFieldPad1)
+	SHADER_PARAMETER(FVector3f, WindFieldDirectionalDirection)
+	SHADER_PARAMETER(float, WindFieldDirectionalStrength)
 	SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, WindFieldTexture)
 	SHADER_PARAMETER_SAMPLER(SamplerState, WindFieldSampler)
 	SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, WindFieldDebugSlice)
@@ -604,6 +681,8 @@ namespace WindField
 		OutParams.WindFieldPad0 = 0.0f;
 		OutParams.WindFieldInvExtent = FVector3f::OneVector;
 		OutParams.WindFieldPad1 = 0.0f;
+		OutParams.WindFieldDirectionalDirection = FVector3f::ZeroVector;
+		OutParams.WindFieldDirectionalStrength = 0.0f;
 		OutParams.WindFieldTexture = GraphBuilder.CreateSRV(GSystemTextures.GetWhiteDummy(GraphBuilder));
 		OutParams.WindFieldSampler = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 		OutParams.WindFieldDebugSlice = GraphBuilder.CreateSRV(GSystemTextures.GetBlackDummy(GraphBuilder));
@@ -641,9 +720,21 @@ void FWindFieldSceneExtension::FRenderer::UpdateSceneUniformBuffer(
 	Params.WindFieldInvExtent = InvExtent;
 	Params.WindFieldPad1 = 0.0f;
 
-	// Use the most recently written RT for material sampling
-	const int32 ReadIdx = 1 - SceneData->CurrentRTIndex;
-	if (SceneData->WindFieldRT[ReadIdx])
+	// Directional wind data — direction (normalized) and strength for scene buffer consumers
+	const FWindDirectionalData& DirData = SceneData->DirectionalData;
+	if (DirData.IsValid())
+	{
+		Params.WindFieldDirectionalDirection = DirData.WindDirection;
+		Params.WindFieldDirectionalStrength = DirData.Strength;
+	}
+	else
+	{
+		Params.WindFieldDirectionalDirection = FVector3f::ZeroVector;
+		Params.WindFieldDirectionalStrength = 0.0f;
+	}
+
+	// Use the persistent output RT for material sampling
+	if (SceneData->OutWindFieldRT)
 	{
 		Params.WindFieldTexture = GraphBuilder.CreateSRV(
 			GraphBuilder.RegisterExternalTexture(SceneData->OutWindFieldRT, TEXT("WindField.Texture")));
@@ -668,3 +759,5 @@ void FWindFieldSceneExtension::FRenderer::UpdateSceneUniformBuffer(
 
 	Buffer.Set(SceneUB::WindField, Params);
 }
+
+UE_ENABLE_OPTIMIZATION_SHIP

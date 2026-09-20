@@ -65,15 +65,24 @@ void UFluid2DInteractionComponent::UpdateInteraction(float DeltaTime)
 	// Continuous wave generation
 	if (bIsSubmerged)
 	{
+		// Compare against the local flow velocity: an object drifting with the current should
+		// not spawn wakes, only motion relative to the water surface should.
 		FVector2D Velocity2D(CurrentVelocity.X, CurrentVelocity.Y);
-		float NewComponentVelocity = Velocity2D.Size();
+		FVector2D FlowVelocity2D = FVector2D::ZeroVector;
+		if (UFluid2DSubsystem* Fluid2DSys = GetFluid2DSubsystem())
+		{
+			FlowVelocity2D = Fluid2DSys->GetFlowVelocityAt(CurrentPosition);
+		}
+		const FVector2D RelativeVelocity2D = Velocity2D - FlowVelocity2D;
+		const float NewComponentVelocity = RelativeVelocity2D.Size();
 
 		if (!bUseComponentVelocity || bUseComponentVelocity && NewComponentVelocity > MinSpeedForInteraction)
 		{
 			bIsInteractionUseful = true;
 
 			CurrentInteractionData.Position = FVector2D(CurrentPosition.X, CurrentPosition.Y);
-			CurrentInteractionData.ForceDirection = bCustomDirection ? CustomDirection.GetSafeNormal() : Velocity2D.GetSafeNormal();
+			CurrentInteractionData.PrevPosition = FVector2D(LastPosition.X, LastPosition.Y);
+			CurrentInteractionData.ForceDirection = bCustomDirection ? CustomDirection.GetSafeNormal() : RelativeVelocity2D.GetSafeNormal();
 			CurrentInteractionData.RadiusParameter = FVector2D(Radius, Width);
 			float DirectionalStrengthFactor = bUseComponentVelocity ? NewComponentVelocity : 1.0f;
 			CurrentInteractionData.StrengthParameter = FVector(DirectionalStrength * DirectionalStrengthFactor, OmniStrength, VortexStrength);

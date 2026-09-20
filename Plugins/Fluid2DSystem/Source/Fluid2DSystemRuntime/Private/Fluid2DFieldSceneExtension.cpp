@@ -344,6 +344,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThre
 			Parameters->InteractionShapeType = (1u << static_cast<uint32>(Interaction.ShapeType));
 			Parameters->InteractionEmissionTypeMask = (1u << static_cast<uint32>(Interaction.EmissionType));
 			Parameters->InteractionPosition = FVector2f(Interaction.Position);
+			Parameters->InteractionPrevPosition = FVector2f(Interaction.PrevPosition);
 			Parameters->InteractionDirection = FVector2f(Interaction.ForceDirection);
 			Parameters->HeightField = GraphBuilder.CreateUAV(HeightRefs[SceneData->CurrentHeightIndex]);
 			Parameters->VelocityField = GraphBuilder.CreateUAV(VelocityRefs[SceneData->CurrentVelocityIndex]);
@@ -574,6 +575,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 			Parameters->InteractionShapeType = (1u << static_cast<uint32>(Interaction.ShapeType));
 			Parameters->InteractionEmissionTypeMask = (1u << static_cast<uint32>(Interaction.EmissionType));
 			Parameters->InteractionPosition = FVector2f(Interaction.Position);
+			Parameters->InteractionPrevPosition = FVector2f(Interaction.PrevPosition);
 			Parameters->InteractionDirection = FVector2f(Interaction.ForceDirection);
 			Parameters->HeightField = GraphBuilder.CreateUAV(HeightRefs[SceneData->CurrentHeightIndex]);
 			Parameters->VelocityField = GraphBuilder.CreateUAV(VelocityRefs[SceneData->CurrentVelocityIndex]);
@@ -851,6 +853,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteMaskAccumulateSolver_RenderTh
 			Parameters->InteractionShapeType = (1u << static_cast<uint32>(Interaction.ShapeType));
 			Parameters->InteractionEmissionTypeMask = (1u << static_cast<uint32>(Interaction.EmissionType));
 			Parameters->InteractionPosition = FVector2f(Interaction.Position);
+			Parameters->InteractionPrevPosition = FVector2f(Interaction.PrevPosition);
 			Parameters->InteractionDirection = FVector2f(Interaction.ForceDirection);
 			Parameters->HeightField = GraphBuilder.CreateUAV(HeightRefs[SceneData->CurrentHeightIndex]);
 			Parameters->VelocityField = nullptr;
@@ -912,7 +915,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteMaskAccumulateSolver_RenderTh
 	}
 }
 
-void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet, FSceneUniformBuffer& SceneUniforms)
+void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet)
 {
 	const FFluid2DFluidConfig& Config = SceneData->CurrentConfig;
 	FIntPoint GridExtent(Config.GridSize, Config.GridSize);
@@ -955,7 +958,8 @@ void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBui
 
 		if (!SceneData->NormalFieldRT)
 		{
-			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->NormalFieldRT, TEXT("NormalFieldRT"));
+			// RG: encoded normal xy (unpack via xy*2-1). B: foam curvature (peak-positive -∇²h, unsigned).
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_FloatR11G11B10), SceneData->NormalFieldRT, TEXT("NormalFieldRT"));
 			FRDGTextureRef NormalTexture = GraphBuilder.RegisterExternalTexture(SceneData->NormalFieldRT, TEXT("Fluid2D.Normal.InitClear"));
 			AddClearRenderTargetPass(GraphBuilder, NormalTexture, FLinearColor::Black);
 		}
@@ -1055,7 +1059,8 @@ void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBui
 
 		if (!SceneData->NormalFieldRT)
 		{
-			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_G16R16F), SceneData->NormalFieldRT, TEXT("NormalFieldRT"));
+			// RG: encoded normal xy (unpack via xy*2-1). B: foam curvature (peak-positive -∇²h, unsigned).
+			GRenderTargetPool.FindFreeElement(GraphBuilder.RHICmdList, CreateWindRenderTargetDesc(GridExtent, EPixelFormat::PF_FloatR11G11B10), SceneData->NormalFieldRT, TEXT("NormalFieldRT"));
 			FRDGTextureRef NormalTexture = GraphBuilder.RegisterExternalTexture(SceneData->NormalFieldRT, TEXT("Fluid2D.Normal.InitClear"));
 			AddClearRenderTargetPass(GraphBuilder, NormalTexture, FLinearColor::Black);
 		}

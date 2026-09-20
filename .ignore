@@ -6,8 +6,9 @@
 /DerivedDataCache
 /Intermediate
 /Saved
-/Plugins/WaterSystem/Docs
-/Plugins/WaterSystem/Intermediate
-/Plugins/WaterSystem/Shaders
+/Tools
+/Plugins/Fluid2DSystem/Docs
+/Plugins/Fluid2DSystem/Intermediate
+/Plugins/Fluid2DSystem/Shaders
 /Plugins/WindSystem/Intermediate
 /Plugins/WindSystem/Shaders

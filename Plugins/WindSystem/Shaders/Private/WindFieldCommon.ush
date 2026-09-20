@@ -41,27 +41,42 @@ float3 ComputeDirectionalWind(FGPUWindSource Source, float3 WorldPos, float Time
 	return Source.Direction * Source.Strength;
 }
 
-/** Point (radial) wind — pushes outward from source position */
+/** Point (radial) wind — pushes outward from source position.
+ *  Special case: when InnerRadius > Radius, the roles invert — the effective
+ *  band lies between [Radius, InnerRadius] and the wind blows INWARD
+ *  (toward the source), useful for suction / vacuum effects. */
 float3 ComputePointWind(FGPUWindSource Source, float3 WorldPos, float Time)
 {
 	float3 Delta = WorldPos - Source.Position;
 	float Distance = length(Delta);
 
-	if (Distance > Source.Radius || Distance < 0.001)
+	if (Distance < 0.001)
 		return float3(0, 0, 0);
 
 	float3 Dir = Delta / Distance;
 
-	// Compute distance-based falloff
+	// Detect inward (suction) mode when InnerRadius > Radius
+	bool bInward = (Source.InnerRadius > Source.Radius);
+	float OuterR = bInward ? Source.InnerRadius : Source.Radius;
+	float InnerR = bInward ? Source.Radius      : Source.InnerRadius;
+
+	// Outside the effective outer boundary → no contribution
+	if (Distance > OuterR)
+		return float3(0, 0, 0);
+
+	// Compute distance-based falloff: 1 at InnerR, 0 at OuterR
 	float NormalizedDist = 0;
-	float RadiusRange = Source.Radius - Source.InnerRadius;
+	float RadiusRange = OuterR - InnerR;
 	if (RadiusRange > 0)
 	{
-		NormalizedDist = saturate((Distance - Source.InnerRadius) / RadiusRange);
+		NormalizedDist = saturate((Distance - InnerR) / RadiusRange);
 	}
 	float Attenuation = pow(1.0 - NormalizedDist, Source.FalloffExponent);
 
-	return Dir * Source.Strength * Attenuation;
+	// Flip direction inward when in suction mode
+	float Sign = bInward ? -1.0 : 1.0;
+
+	return Dir * (Sign * Source.Strength * Attenuation);
 }
 
 /** Vortex (rotational) wind — swirls around vertical axis at source position */

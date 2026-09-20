@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "RHIResources.h"
+#include "Engine/Texture2D.h"
 #include "Fluid2DFluidTypes.generated.h"
 
 /**
@@ -26,8 +27,10 @@ UENUM(BlueprintType)
 enum class ESourceShapeType : uint8
 {
 	Disk UMETA(DisplayName = "Disk Shape"),
-	
-	Ring UMETA(DisplayName = "Ring Shape")
+
+	Ring UMETA(DisplayName = "Ring Shape"),
+
+	Capsule UMETA(DisplayName = "Capsule Shape (swept disk)")
 };
 
 UENUM(BlueprintType)
@@ -112,9 +115,25 @@ struct FFluid2DFluidConfig
 	/** Mask accumulate fade factor */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float MA_FadeFactor = 0.98f;
+
+	/** Noise texture used by Flow Volumes (intensity in R channel) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Flow")
+	TObjectPtr<UTexture2D> FlowNoiseTexture = nullptr;
+
+	/** Tiling scale of the flow noise texture over the simulation domain */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Flow", meta = (ClampMin = "0.01", UIMin = "0.01", UIMax = "10"))
+	float FlowNoiseTiling = 1.0f;
+
+	/** Minimum noise modulation applied to the flow speed when noise samples 0. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Flow", meta = (ClampMin = "0", UIMin = "0", UIMax = "2"))
+	float FlowNoiseIntensityMin = 0.5f;
+
+	/** Maximum noise modulation applied to the flow speed when noise samples 1. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Flow", meta = (ClampMin = "0", UIMin = "0", UIMax = "2"))
+	float FlowNoiseIntensityMax = 1.0f;
 };
 
-/** Render-thread-safe snapshot of global flow data (produced by UFluid2DGlobalFlowComponent) */
+/** Render-thread-safe snapshot of global flow data (produced by AFluid2DFlowVolume blending) */
 struct FFluid2DGlobalFlowData
 {
 	FVector2D FlowDirection = FVector2D(1.0, 0.0);
@@ -133,6 +152,10 @@ struct FFluid2DInteractionData
 	/** Interaction position in 2D */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
 	FVector2D Position = FVector2D::ZeroVector;
+
+	/** Previous-frame interaction position (used by Capsule shape to sweep between frames) */
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FVector2D PrevPosition = FVector2D::ZeroVector;
 
 	/** Interaction force/velocity */
 	UPROPERTY(BlueprintReadOnly, Category = "Interaction")

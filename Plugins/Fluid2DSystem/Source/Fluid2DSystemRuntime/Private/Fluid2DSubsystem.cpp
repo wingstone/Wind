@@ -6,7 +6,9 @@
 #include "Fluid2DFieldSceneExtension.h"
 #include "Fluid2DInteractionComponent.h"
 #include "Fluid2DFluidConfigComponent.h"
-#include "Fluid2DGlobalFlowComponent.h"
+#include "Fluid2DFlowVolume.h"
+#include "Engine/Texture2D.h"
+#include "TextureResource.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "SceneInterface.h"
@@ -52,6 +54,7 @@ void UFluid2DSubsystem::Tick(float DeltaTime)
 
 	ScrollWorldGrid();
 	UpdateInteractions();
+	UpdateGlobalFlow();
 }
 
 TStatId UFluid2DSubsystem::GetStatId() const
@@ -82,22 +85,54 @@ void UFluid2DSubsystem::RegisterFluidConfigComponent(UFluid2DFluidConfigComponen
 void UFluid2DSubsystem::UnregisterFluidConfigComponent(UFluid2DFluidConfigComponent* Component)
 {
 	RegisteredFluidConfigComponents.Remove(Component);
+	// Fall back to the project settings default (or the next registered override) now that this component is gone.
+	ResetState();
 }
 
-void UFluid2DSubsystem::RegisterGlobalFlowComponent(UFluid2DGlobalFlowComponent* Component)
+void UFluid2DSubsystem::InsertFlowVolume(AFluid2DFlowVolume* Volume)
 {
-	RegisteredGlobalFlowComponents.AddUnique(Component);
+	if (!Volume)
+	{
+		return;
+	}
+
+	// Dedup, then insert so the array is ordered: bounded volumes by Priority (high first),
+	// followed by unbound volumes (also Priority high first). Higher-priority volumes are tried
+	// first during blending; unbound volumes act as fallbacks at the tail.
+	if (FlowVolumes.Contains(Volume))
+	{
+		return;
+	}
+
+	int32 InsertIndex = FlowVolumes.Num();
+	for (int32 i = 0; i < FlowVolumes.Num(); ++i)
+	{
+		const AFluid2DFlowVolume* CurrentVolume = FlowVolumes[i];
+		if (!CurrentVolume)
+		{
+			continue;
+		}
+
+		const bool bCurrentComesBefore = (!CurrentVolume->bUnbound && Volume->bUnbound)
+			|| (CurrentVolume->bUnbound == Volume->bUnbound && CurrentVolume->Priority >= Volume->Priority);
+		if (!bCurrentComesBefore)
+		{
+			InsertIndex = i;
+			break;
+		}
+	}
+	FlowVolumes.Insert(Volume, InsertIndex);
 }
 
-void UFluid2DSubsystem::UnregisterGlobalFlowComponent(UFluid2DGlobalFlowComponent* Component)
+void UFluid2DSubsystem::RemoveFlowVolume(AFluid2DFlowVolume* Volume)
 {
-	RegisteredGlobalFlowComponents.Remove(Component);
+	FlowVolumes.RemoveSingle(Volume);
 }
 
-void UFluid2DSubsystem::ScrollWorldGrid()
+FVector UFluid2DSubsystem::GetSampleLocation() const
 {
 	// Prefer the player pawn location so the simulation follows gameplay position.
-	FVector ScrollTargetLocation = FVector::ZeroVector;
+	FVector SampleLocation = FVector::ZeroVector;
 	if (UWorld* World = GetWorld())
 	{
 		APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
@@ -105,23 +140,28 @@ void UFluid2DSubsystem::ScrollWorldGrid()
 		{
 			if (const APawn* PlayerPawn = PlayerController->GetPawn())
 			{
-				ScrollTargetLocation = PlayerPawn->GetActorLocation();
+				SampleLocation = PlayerPawn->GetActorLocation();
 			}
 			else if (PlayerController->PlayerCameraManager != nullptr)
 			{
-				ScrollTargetLocation = PlayerController->PlayerCameraManager->GetCameraLocation();
+				SampleLocation = PlayerController->PlayerCameraManager->GetCameraLocation();
 			}
 		}
 		else
 		{
-			auto ViewLocations = World->ViewLocationsRenderedLastFrame;
+			const auto& ViewLocations = World->ViewLocationsRenderedLastFrame;
 			if (ViewLocations.Num() > 0)
 			{
-				ScrollTargetLocation = ViewLocations[0];
+				SampleLocation = ViewLocations[0];
 			}
 		}
 	}
+	return SampleLocation;
+}
 
+void UFluid2DSubsystem::ScrollWorldGrid()
+{
+	const FVector ScrollTargetLocation = GetSampleLocation();
 	FIntVector2 ScrollTargetLocationInt = FIntVector2(FMath::RoundToInt(ScrollTargetLocation.X), FMath::RoundToInt(ScrollTargetLocation.Y));
 	
 	// Update scrolling origin if view has moved significantly to maintain precision
@@ -163,11 +203,16 @@ void UFluid2DSubsystem::UpdateFluidConfig()
 	if (GetWorld() && GetWorld()->Scene)
 	{
 		FFluid2DFluidConfig ApplyFluidConfig = FluidConfig;
-		if (RegisteredFluidConfigComponents.Num() > 0)
+		if (RegisteredFluidConfigComponents.Num() > 0 && RegisteredFluidConfigComponents[0])
 		{
-			// For now just take the first registered config component, we can blend them later if needed
+			// For now just take the first registered config component, we can blend them later if needed.
+			// The project-settings default (loaded in Initialize / LoadGlobalFluidConfig) is used when no component is registered.
 			ApplyFluidConfig = RegisteredFluidConfigComponents[0]->GetFluidConfig();
 		}
+
+		// Keep the CPU-side FluidConfig in sync with what we push to the render thread so game-thread readers
+		// (e.g. UFluid2DInteractionComponent::IsSubmerged, ScrollWorldGrid) observe the currently-effective config.
+		FluidConfig = ApplyFluidConfig;
 
 		ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
 		[WorldScene = GetWorld()->Scene, FluidConfig = ApplyFluidConfig](FRHICommandListImmediate& RHICmdList)
@@ -221,20 +266,31 @@ void UFluid2DSubsystem::UpdateInteractions()
 
 void UFluid2DSubsystem::UpdateGlobalFlow()
 {
-	if (!GetWorld() || !GetWorld()->Scene || RegisteredGlobalFlowComponents.Num() == 0)
+	if (!GetWorld() || !GetWorld()->Scene)
 	{
 		return;
 	}
 
-	// Collect the first active global flow component
+	// Resolve which fluid config is currently in effect for texture / tiling / noise-modulation.
+	const FFluid2DFluidConfig& ActiveConfig = (RegisteredFluidConfigComponents.Num() > 0 && RegisteredFluidConfigComponents[0])
+		? RegisteredFluidConfigComponents[0]->FluidConfig
+		: FluidConfig;
+
 	FFluid2DGlobalFlowData FlowData;
-	for (UFluid2DGlobalFlowComponent* Component : RegisteredGlobalFlowComponents)
+
+	float BlendWeight = 0.0f;
+	if (AFluid2DFlowVolume* Volume = ResolveFlowVolumeAt(GetSampleLocation(), BlendWeight))
 	{
-		if (Component && Component->IsFlowEnabled())
-		{
-			FlowData = Component->GetGlobalFlowData();
-			break;
-		}
+		const float SpeedWeighted = Volume->Speed * BlendWeight;
+		FlowData.FlowDirection = Volume->FlowDirection.GetSafeNormal();
+		FlowData.FlowNoiseIntensityMin = ActiveConfig.FlowNoiseIntensityMin * SpeedWeighted;
+		FlowData.FlowNoiseIntensityMax = ActiveConfig.FlowNoiseIntensityMax * SpeedWeighted;
+	}
+
+	FlowData.FlowNoiseTiling = ActiveConfig.FlowNoiseTiling;
+	if (ActiveConfig.FlowNoiseTexture && ActiveConfig.FlowNoiseTexture->GetResource())
+	{
+		FlowData.FlowNoiseTextureRHI = ActiveConfig.FlowNoiseTexture->GetResource()->TextureRHI;
 	}
 
 	ENQUEUE_RENDER_COMMAND(UpdateGlobalFlow)(
@@ -248,6 +304,53 @@ void UFluid2DSubsystem::UpdateGlobalFlow()
 				}
 			}
 		});
+}
+
+AFluid2DFlowVolume* UFluid2DSubsystem::ResolveFlowVolumeAt(const FVector& WorldPos, float& OutBlendWeight) const
+{
+	// Priority-first, break at first hit. Volumes are kept ordered by InsertFlowVolume so
+	// higher-priority bounded volumes are tried first; unbound volumes at the tail act as fallbacks.
+	OutBlendWeight = 0.0f;
+	for (AFluid2DFlowVolume* Volume : FlowVolumes)
+	{
+		if (!Volume || !Volume->bEnabled)
+		{
+			continue;
+		}
+
+		if (Volume->bUnbound)
+		{
+			OutBlendWeight = 1.0f;
+			return Volume;
+		}
+
+		float DistanceToPoint = 0.0f;
+		if (Volume->EncompassesPoint(WorldPos, 0.0f, &DistanceToPoint) && DistanceToPoint >= 0.0f)
+		{
+			float Weight = 1.0f;
+			if (Volume->BlendRadius > 0.0f && DistanceToPoint < Volume->BlendRadius)
+			{
+				// Full weight deep inside; fades to 0 at the boundary.
+				Weight = 1.0f - DistanceToPoint / Volume->BlendRadius;
+			}
+			OutBlendWeight = Weight;
+			return Volume;
+		}
+	}
+	OutBlendWeight = FMath::Clamp(OutBlendWeight, 0.0f, 1.0f);
+	return nullptr;
+}
+
+FVector2D UFluid2DSubsystem::GetFlowVelocityAt(const FVector& WorldPos) const
+{
+	float BlendWeight = 0.0f;
+	AFluid2DFlowVolume* Volume = ResolveFlowVolumeAt(WorldPos, BlendWeight);
+	if (!Volume)
+	{
+		return FVector2D::ZeroVector;
+	}
+
+	return Volume->FlowDirection.GetSafeNormal() * (Volume->Speed * BlendWeight);
 }
 
 

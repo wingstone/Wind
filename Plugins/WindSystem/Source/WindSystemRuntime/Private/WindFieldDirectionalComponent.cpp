@@ -5,7 +5,10 @@
 #include "Engine/Texture2D.h"
 #include "TextureResource.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "DrawDebugHelpers.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogWindDirectional, Log, All);
 
 UWindFieldDirectionalComponent::UWindFieldDirectionalComponent()
 {
@@ -25,9 +28,13 @@ void UWindFieldDirectionalComponent::TickComponent(float DeltaTime, ELevelTick T
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 #if WITH_EDITOR
-	if (GetWorld())
+	if (UWorld* World = GetWorld())
 	{
-		DrawDebug();
+		// 仅在编辑器预览世界（非运行/非PIE）下绘制调试
+		if (World->WorldType == EWorldType::Editor || World->WorldType == EWorldType::EditorPreview)
+		{
+			DrawDebug();
+		}
 	}
 #endif
 }
@@ -125,9 +132,24 @@ void UWindFieldDirectionalComponent::DrawDebug(float Lifetime) const
 
 void UWindFieldDirectionalComponent::RegisterWithSubsystem()
 {
+	UWorld* World = GetWorld();
+	UE_LOG(LogWindDirectional, Warning, TEXT("[WindDir] Register attempt: Owner=%s Comp=%s World=%s WorldType=%d bEnable=%d IsActive=%d"),
+		*GetNameSafe(GetOwner()),
+		*GetName(),
+		*GetNameSafe(World),
+		World ? (int32)World->WorldType : -1,
+		bEnableDirectionalWind ? 1 : 0,
+		IsActive() ? 1 : 0);
+
 	if (UWindSubsystem* Sub = GetWindSubsystem())
 	{
 		Sub->RegisterDirectionalWind(this);
+		UE_LOG(LogWindDirectional, Warning, TEXT("[WindDir]   -> registered OK"));
+	}
+	else
+	{
+		UE_LOG(LogWindDirectional, Warning, TEXT("[WindDir]   -> NO SUBSYSTEM (World=%s WorldType=%d)"),
+			*GetNameSafe(World), World ? (int32)World->WorldType : -1);
 	}
 }
 
@@ -136,6 +158,8 @@ void UWindFieldDirectionalComponent::UnregisterFromSubsystem()
 	if (UWindSubsystem* Sub = GetWindSubsystem())
 	{
 		Sub->UnregisterDirectionalWind(this);
+		UE_LOG(LogWindDirectional, Warning, TEXT("[WindDir] Unregistered: Owner=%s Comp=%s"),
+			*GetNameSafe(GetOwner()), *GetName());
 	}
 }
 
