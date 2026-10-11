@@ -1,0 +1,26 @@
+{
+	// The engine install path is hard-coded in tasks.json, matching the convention already
+	// used by the UBT-generated task and launch entries in Wind.code-workspace.
+	// Treat UE build/descriptor scripts as their host language instead of plain text.
+	"files.associations": {
+		"*.Build.cs": "csharp",
+		"*.Target.cs": "csharp",
+		"*.uproject": "json",
+		"*.uplugin": "json"
+	},
+
+	// Keep generated output out of search results and file watching.
+	"search.exclude": {
+		"**/Binaries/**": true,
+		"**/DerivedDataCache/**": true,
+		"**/Intermediate/**": true,
+		"**/Saved/**": true,
+		"**/.vscode/compileCommands_*/**": true
+	},
+	"files.watcherExclude": {
+		"**/Binaries/**": true,
+		"**/DerivedDataCache/**": true,
+		"**/Intermediate/**": true,
+		"**/Saved/**": true
+	}
+}

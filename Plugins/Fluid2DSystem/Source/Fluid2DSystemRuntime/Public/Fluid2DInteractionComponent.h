@@ -48,7 +48,9 @@ public:
 	float Width = 0.0f; // Only used for ring shape
 
 	/** Whether to use a custom interaction direction */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	// ScriptName keeps this out of the way of CustomDirection below; in Python both names
+	// sanitize to custom_direction, and Python refuses to expose the duplicate.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (ScriptName = "use_custom_direction"))
 	bool bCustomDirection = false;
 
 	/** Custom interaction direction in world space, used when bCustomDirection is true */
