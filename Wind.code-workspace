@@ -630,8 +630,6 @@
 				"args": [
 					"-projectfiles",
 					"-vscode",
-					"-project=E:\\Github\\Wind\\Wind.uproject",
-					"-game",
 					"-engine",
 					"-dotnet"
 				],
