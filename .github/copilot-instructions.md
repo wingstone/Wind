@@ -49,6 +49,9 @@ Engine\Build\BatchFiles\Build.bat -Mode=GenerateProjectFiles -Project=E:\Github\
 - 新增依赖只能写进 `*.Build.cs`；不要在源码里用 `#include` 绕过模块边界
 - `UE5` 文件夹下的引擎源码是只读参考，不要修改引擎文件
 - `.vscode/compileCommands_*.json` 和 `c_cpp_properties.json` 由 UBT 生成，不要手改；`.vscode/tasks.json` 与 `.vscode/settings.json` 是手写的，可以改
+
+### Git操作硬性约束
+
 - Git的拉取与推送都由人工操作，禁止在 CI/CD 里自动拉取或推送
 
 ## 详细规范
