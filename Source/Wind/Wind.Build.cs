@@ -26,6 +26,7 @@ public class Wind : ModuleRules
 
 		PublicIncludePaths.AddRange(new string[] {
 			"Wind",
+			"Wind/Petals",
 			"Wind/Variant_Flight",
 			"Wind/Variant_Platforming",
 			"Wind/Variant_Platforming/Animation",
