@@ -7,12 +7,11 @@
 #include "WindFlierGameMode.generated.h"
 
 /**
- * Game mode for the standalone wind flight 3C.
+ * 独立风力飞行 3C 的 GameMode。
  *
- * Unlike the other variants' game modes, which are abstract bases for Blueprint
- * subclasses, this one is concrete and wires itself up: the flight controller
- * needs no assets to run, so setting this as the default game mode is enough to
- * press play and fly.
+ * 与其他变体的 GameMode（作为蓝图子类的抽象基类）不同，这个 GameMode
+ * 是具体的，并且自己完成了全部装配：飞行控制器不需要任何资产即可运行，
+ * 所以把它设为默认 GameMode 就可以直接按下 Play 起飞。
  */
 UCLASS(Blueprintable, meta = (DisplayName = "Wind Flier Game Mode"))
 class AWindFlierGameMode : public AGameModeBase

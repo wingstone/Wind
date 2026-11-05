@@ -28,6 +28,10 @@ applyTo: ["Source/**/*.h", "Source/**/*.cpp"]
 - 新增 `UCLASS` 时不要顺手加 `Blueprintable`，除非确实要派蓝图子类。需要编辑器友好名字用 `meta = (DisplayName = "...")`。
 - 覆盖虚函数时用 `virtual ... override`；接口实现方法必须加 `virtual ... override`，否则不参与虚表分发。
 
+## 注释
+
+- 所有非copyright的注释都使用中文。
+
 ## GC 与对象指针
 
 - 任何需要被 GC 追踪的 `UObject` 成员都必须标 `UPROPERTY()`；未标 `UPROPERTY` 的裸 `UObject*` 成员会被 GC 回收成悬垂指针。

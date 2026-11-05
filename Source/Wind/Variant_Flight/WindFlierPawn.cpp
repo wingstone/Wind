@@ -8,21 +8,20 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "InputActionValue.h"
-#include "WindGustComponent.h"
 
 AWindFlierPawn::AWindFlierPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	// The pawn owns its rotation outright. APawn::FaceRotation only touches the
-	// actor when one of these is set, so leaving them off keeps the controller
-	// from fighting the aim.
+	// Pawn 完全掌管自身旋转。只有当下面任意一个为 true 时，
+	// APawn::FaceRotation 才会去修改 Actor 的旋转，所以保持关闭
+	// 可以避免 Controller 和瞄准互相打架。
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
-	// Deliberately a bare scene component: the wind has no body, so nothing here
-	// can collide, block, or push.
+	// 刻意只用一个裸的 SceneComponent：风没有身体，所以这里的任何东西
+	// 都不会碰撞、不会阻挡、不会推动其他物体。
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
 
@@ -30,17 +29,14 @@ AWindFlierPawn::AWindFlierPawn()
 	ViewCamera->SetupAttachment(SceneRoot);
 	ViewCamera->bUsePawnControlRotation = false;
 	ViewCamera->FieldOfView = 90.0f;
-
-	WindGust = CreateDefaultSubobject<UWindGustComponent>(TEXT("WindGust"));
-	WindGust->SetupAttachment(ViewCamera);
 }
 
 void AWindFlierPawn::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Seed the aim from wherever the pawn was placed, so a level-placed flier
-	// already looks where its PlayerStart points.
+	// 从 Pawn 被放置的位置继承瞄准，这样关卡里摆放的 Flier
+	// 一开始就看向 PlayerStart 指向的方向。
 	const FRotator StartRotation = GetActorRotation();
 	CurrentYaw = TargetYaw = StartRotation.Yaw;
 	CurrentPitch = TargetPitch = FMath::Clamp(StartRotation.Pitch, MinPitch, MaxPitch);
@@ -102,17 +98,6 @@ void AWindFlierPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 		PlayerInputComponent->BindAxis(TEXT("WindFlier_LookYaw"), this, &AWindFlierPawn::Input_LookYaw);
 		PlayerInputComponent->BindAxis(TEXT("WindFlier_LookPitch"), this, &AWindFlierPawn::Input_LookPitch);
 	}
-
-	if (EnhancedInput && ChargeAction)
-	{
-		EnhancedInput->BindAction(ChargeAction, ETriggerEvent::Started, this, &AWindFlierPawn::DoChargeStart);
-		EnhancedInput->BindAction(ChargeAction, ETriggerEvent::Completed, this, &AWindFlierPawn::DoChargeStop);
-	}
-	else
-	{
-		PlayerInputComponent->BindAction(TEXT("WindFlier_Charge"), IE_Pressed, this, &AWindFlierPawn::DoChargeStart);
-		PlayerInputComponent->BindAction(TEXT("WindFlier_Charge"), IE_Released, this, &AWindFlierPawn::DoChargeStop);
-	}
 }
 
 void AWindFlierPawn::DoMove(float Right, float Forward, float Up)
@@ -126,22 +111,6 @@ void AWindFlierPawn::DoLook(float Yaw, float Pitch)
 {
 	TargetYaw += Yaw * LookSensitivity;
 	TargetPitch = FMath::Clamp(TargetPitch + Pitch * LookSensitivity, MinPitch, MaxPitch);
-}
-
-void AWindFlierPawn::DoChargeStart()
-{
-	if (WindGust)
-	{
-		WindGust->StartCharging();
-	}
-}
-
-void AWindFlierPawn::DoChargeStop()
-{
-	if (WindGust)
-	{
-		WindGust->StopCharging();
-	}
 }
 
 void AWindFlierPawn::Input_MoveAction(const FInputActionValue& Value)
@@ -165,8 +134,8 @@ void AWindFlierPawn::Input_LookAction(const FInputActionValue& Value)
 
 void AWindFlierPawn::UpdateAim(float DeltaSeconds)
 {
-	// Shrink the unwrapped angles now and then without changing the delta between
-	// them, so a long session cannot drift into float precision trouble.
+	// 偶尔收缩一下未展开的角度，但不改变它们之间的差值，
+	// 这样长时间游玩也不会漂到浮点精度不够用的地步。
 	if (FMath::Abs(TargetYaw) > 3600.0f)
 	{
 		const float Offset = FMath::GridSnap(TargetYaw, 360.0f);
@@ -174,7 +143,7 @@ void AWindFlierPawn::UpdateAim(float DeltaSeconds)
 		CurrentYaw -= Offset;
 	}
 
-	// The aim chases the target rather than matching it. That lag is the drag.
+	// 瞄准是追着目标走的，而不是直接等于目标。那段滞后就是所谓的"拖拽感"。
 	CurrentYaw = FMath::FInterpTo(CurrentYaw, TargetYaw, DeltaSeconds, AimInterpSpeed);
 	CurrentPitch = FMath::FInterpTo(CurrentPitch, TargetPitch, DeltaSeconds, AimInterpSpeed);
 
@@ -184,7 +153,7 @@ void AWindFlierPawn::UpdateAim(float DeltaSeconds)
 		const FRotator AimRotation(CurrentPitch, CurrentYaw, 0.0f);
 		const float LateralSpeed = FVector::DotProduct(FlyVelocity, FRotationMatrix(AimRotation).GetUnitAxis(EAxis::Y));
 
-		// Negative roll drops the wing on the side the pawn is sliding toward.
+		// 负 roll 使 Pawn 向横向滑动的那一侧压翼。
 		TargetBank = -FMath::Clamp(LateralSpeed / FMath::Max(MaxFlySpeed, 1.0f), -1.0f, 1.0f) * BankAngleMax;
 	}
 
@@ -198,8 +167,7 @@ void AWindFlierPawn::UpdateFlight(float DeltaSeconds)
 		return;
 	}
 
-	// Roll is excluded from the flight basis: banking tilts the view, it does not
-	// steer the glide.
+	// Roll 不参与飞行基向量：倾斜只影响视觉，不影响滑翔方向。
 	const FMatrix AimBasis = FRotationMatrix(FRotator(CurrentPitch, CurrentYaw, 0.0f));
 
 	FVector Throttle = AimBasis.GetUnitAxis(EAxis::X) * MoveInputForward + AimBasis.GetUnitAxis(EAxis::Y) * MoveInputRight;
@@ -215,8 +183,8 @@ void AWindFlierPawn::UpdateFlight(float DeltaSeconds)
 
 	FlyVelocity += Acceleration * DeltaSeconds;
 
-	// Exponential drag is frame-rate independent and is what makes the pawn glide:
-	// letting go of the throttle can only ever slow it down gradually.
+	// 指数阻力与帧率无关，正是它让 Pawn 可以滑翔：
+	// 松开油门后，速度只能缓慢下降，不会骤停。
 	FlyVelocity *= FMath::Exp(-AirDrag * DeltaSeconds);
 
 	const float MaxSpeed = FMath::Max(MaxFlySpeed, 1.0f);
@@ -227,7 +195,7 @@ void AWindFlierPawn::UpdateFlight(float DeltaSeconds)
 
 	if (!FlyVelocity.IsNearlyZero(0.1f))
 	{
-		// Never swept: the pawn is not meant to be stopped by geometry.
+		// 不使用 sweep：Pawn 不应该被几何体阻挡。
 		AddActorWorldOffset(FlyVelocity * DeltaSeconds, /*bSweep=*/false);
 	}
 }
