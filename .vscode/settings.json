@@ -1,6 +1,7 @@
 {
-	// The engine install path is hard-coded in tasks.json, matching the convention already
-	// used by the UBT-generated task and launch entries in Wind.code-workspace.
+	// The engine install path is hard-coded in tasks.json and Wind.code-workspace.
+	// To switch machines, copy local.config.example -> local.config, fill in your
+	// local paths, and run Tools\setup-vscode.ps1. See local.config.example for details.
 	// Treat UE build/descriptor scripts as their host language instead of plain text.
 	"files.associations": {
 		"*.Build.cs": "csharp",

@@ -1,0 +1,13 @@
+# Wind 项目 — 本机路径配置模板
+#
+# 推荐流程：直接运行 Tools\setup-vscode.ps1，脚本会自动探测 UE 5.8 位置
+# 并生成 local.config（基于注册表 / Launcher 清单 / 常见路径枚举）。
+# 探测失败时，才将本文件复制为 local.config 并手工填写。
+#
+# local.config 已加入 .gitignore，不会提交到仓库。
+
+# Unreal Engine 5.8 根目录（结尾不加反斜杠）
+UE_ROOT=E:\ProgramFiles\Epic Games\UE_5.8
+
+# 项目根目录，即 Wind.uproject 所在目录（结尾不加反斜杠）
+PROJECT_ROOT=E:\Github\Wind
