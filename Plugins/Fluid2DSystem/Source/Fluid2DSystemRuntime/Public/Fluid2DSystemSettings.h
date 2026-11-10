@@ -10,8 +10,8 @@
 
 /**
  * Global water system settings accessible via Project Settings → Game → Fluid2D System.
- * Provides default FluidConfig values that can be overridden per-level
- * by placing an AFluid2DFluidConfigActor in the level.
+ * Provides the default configuration of every solver layer, which can be overridden per-level
+ * by placing AFluid2DFluidConfigActor actors (one per solver layer) in the level.
  */
 UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Fluid2D System"))
 class FLUID2DSYSTEMRUNTIME_API UFluid2DSystemSettings : public UDeveloperSettings
@@ -19,7 +19,7 @@ class FLUID2DSYSTEMRUNTIME_API UFluid2DSystemSettings : public UDeveloperSetting
 	GENERATED_BODY()
 
 public:
-	/** Default fluid simulation configuration */
+	/** Default configuration of all solver layers; each layer can be tuned independently. */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Fluid Simulation")
 	FFluid2DFluidConfig DefaultFluidConfig;
 

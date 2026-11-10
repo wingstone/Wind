@@ -14,6 +14,8 @@ Fluid2DSystem现已重构为使用UE5的现代化**SceneExtension**架构，这�
   - 自动注册到场景渲染管线
   - 使用RenderGraph管理GPU资源
   - 在`PreRender`阶段执行流体模拟
+  - 每种启用的求解器拥有一个独立的`FFluid2DSolverLayer`（各自的高度场/速度场/压力场/法线场），
+    因此多种流体可以同时存在；未启用的层会被跳过并释放资源
 
 ### 2. **UFluid2DSubsystem** (游戏线程)
 - **位置**: `Fluid2DSystemRuntime`模块
@@ -47,9 +49,10 @@ UFluid2DSubsystem                   FFluid2DFieldSceneExtension
      |                                   ├─ Initialize Resources (RenderGraph)
      |                                   ├─ Apply Disturbances
      |                                   ├─ Apply Interactions
-     |                                   └─ Execute Solver
-     |                                         ├─ ShallowWater或
-     |                                         └─ NavierStokes
+     |                                   └─ Execute Solvers (每个启用的求解器一层)
+     |                                         ├─ ShallowWater
+     |                                         ├─ NavierStokes
+     |                                         └─ MaskAccumulate
      |                                   |
      |                             PostRender()
      |                                   └─ Readback (optional)
@@ -97,9 +100,10 @@ FRDGTextureRef HeightTexture = GraphBuilder.RegisterExternalTexture(HeightFieldR
 // 获取Subsystem
 UFluid2DSubsystem* Fluid2DSys = GetWorld()->GetSubsystem<UFluid2DSubsystem>();
 
-// 配置
-Fluid2DSys->FluidConfig.SolverType = EFluidSolverType::ShallowWater;
-Fluid2DSys->FluidConfig.GridSize = 256;
+// 每层独立配置（这里启用并配置浅水层）
+Fluid2DSys->FluidConfig.ShallowWater.bEnabled = true;
+Fluid2DSys->FluidConfig.ShallowWater.GridSize = 256;
+Fluid2DSys->FluidConfig.ShallowWater.WorldSize = 20000.0f;
 
 // 创建水花
 Fluid2DSys->CreateSplash(Position, Strength, Radius);

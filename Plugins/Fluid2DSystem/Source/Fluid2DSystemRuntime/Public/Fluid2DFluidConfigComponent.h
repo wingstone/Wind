@@ -10,7 +10,10 @@
 class UFluid2DSubsystem;
 
 /**
- * Component for configuring water fluid settings
+ * Component that overrides the configuration of a single solver layer.
+ *
+ * Solver types coexist, so a level can hold one component per layer: each component picks its
+ * SolverType and only the matching config struct below is applied to that layer.
  */
 UCLASS(ClassGroup = (Fluid2D), meta = (BlueprintSpawnableComponent))
 class FLUID2DSYSTEMRUNTIME_API UFluid2DFluidConfigComponent : public USceneComponent
@@ -20,11 +23,24 @@ class FLUID2DSYSTEMRUNTIME_API UFluid2DFluidConfigComponent : public USceneCompo
 public:
 	UFluid2DFluidConfigComponent();
 
-	/** Fluid simulation configuration */
+	/** Solver layer configured by this component. Only the matching config below is applied. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation")
-	FFluid2DFluidConfig FluidConfig;
+	EFluidSolverType SolverType = EFluidSolverType::ShallowWater;
 
-	FFluid2DFluidConfig GetFluidConfig() const { return FluidConfig; }
+	/** Shallow water layer config, applied when SolverType is ShallowWater. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (EditCondition = "SolverType == EFluidSolverType::ShallowWater", EditConditionHides))
+	FSWFluidConfig ShallowWater;
+
+	/** Navier-Stokes layer config, applied when SolverType is NavierStokes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (EditCondition = "SolverType == EFluidSolverType::NavierStokes", EditConditionHides))
+	FNSFluidConfig NavierStokes;
+
+	/** Mask accumulate layer config, applied when SolverType is MaskAccumulate. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (EditCondition = "SolverType == EFluidSolverType::MaskAccumulate", EditConditionHides))
+	FMAFluidConfig MaskAccumulate;
+
+	/** Configuration of the layer selected by SolverType. */
+	const FFluid2DSolverConfigBase& GetSolverConfig() const;
 
 protected:
 	virtual void BeginPlay() override;

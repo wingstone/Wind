@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Volume.h"
+#include "Fluid2DFluidTypes.h"
 #include "Fluid2DFlowVolume.generated.h"
 
 /**
@@ -46,6 +47,16 @@ public:
 	/** Base flow speed (cm/s) applied inside this volume. Modulated by the global flow noise (min/max in FluidConfig). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid2D Flow Volume", meta = (ClampMin = "0", UIMin = "0", UIMax = "1000"))
 	float Speed;
+
+	/** Solver layers this volume drives. Empty = every enabled layer. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid2D Flow Volume")
+	TSet<EFluidSolverType> TargetSolverTypes;
+
+	/** True when this volume drives the given solver layer. */
+	bool AppliesTo(EFluidSolverType SolverType) const
+	{
+		return TargetSolverTypes.Num() == 0 || TargetSolverTypes.Contains(SolverType);
+	}
 
 	//~ Begin AActor Interface
 	virtual void PostUnregisterAllComponents() override;

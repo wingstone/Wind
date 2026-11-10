@@ -4,7 +4,7 @@
 
 ### 🌊 浅水方程 (Shallow Water)
 ```cpp
-Config.SolverType = EFluidSolverType::ShallowWater;
+Config.ShallowWater.bEnabled = true;
 ```
 **何时使用**：大场景、需要性能、水面波浪、2D游戏  
 **性能**：⭐⭐⭐⭐⭐ 快  
@@ -13,7 +13,7 @@ Config.SolverType = EFluidSolverType::ShallowWater;
 
 ### 💨 Navier-Stokes
 ```cpp
-Config.SolverType = EFluidSolverType::NavierStokes;
+Config.NavierStokes.bEnabled = true;
 ```
 **何时使用**：精细效果、涡旋必需、烟雾、高质量  
 **性能**：⭐⭐⭐ 中等  
@@ -26,30 +26,25 @@ Config.SolverType = EFluidSolverType::NavierStokes;
 
 ### 海洋波浪（性能优先）
 ```cpp
-Config.SolverType = EFluidSolverType::ShallowWater;
-Config.GridSize = 512;
-Config.Gravity = 980.0f;
-Config.Viscosity = 0.01f;
-Config.Damping = 0.02f;
-Substeps = 1;
+Config.ShallowWater.bEnabled = true;
+Config.ShallowWater.GridSize = 512;
+Config.ShallowWater.SimulationSubsteps = 1;
 ```
 
 ### 室内水池（质量优先）
 ```cpp
-Config.SolverType = EFluidSolverType::NavierStokes;
-Config.GridSize = 256;
-Config.Density = 1.0f;
-Config.Viscosity = 0.02f;
-Config.Damping = 0.01f;
-Substeps = 4;
+Config.NavierStokes.bEnabled = true;
+Config.NavierStokes.GridSize = 256;
+Config.NavierStokes.Viscosity = 0.02f;
+Config.NavierStokes.Damping = 0.01f;
+Config.NavierStokes.SimulationSubsteps = 4;
 ```
 
 ### 移动平台
 ```cpp
-Config.SolverType = EFluidSolverType::ShallowWater;
-Config.GridSize = 128;
-Config.Damping = 0.2f;  // 快速衰减
-Substeps = 1;
+Config.ShallowWater.bEnabled = true;
+Config.ShallowWater.GridSize = 128;
+Config.ShallowWater.SimulationSubsteps = 1;
 ```
 
 ---
@@ -58,8 +53,9 @@ Substeps = 1;
 
 | 参数 | 浅水方程 | Navier-Stokes | 说明 |
 |------|---------|---------------|------|
-| `SolverType` | 必需 | 必需 | 求解器类型 |
-| `GridSize` | 256-512 | 128-256 | 网格分辨率 |
+| `bEnabled` | 必需 | 必需 | 该层是否参与模拟 |
+| `GridSize` | 256-512 | 128-256 | 网格分辨率（逐层独立） |
+| `WorldSize` | 20000 | 5000 | 模拟区域尺寸（逐层独立） |
 | `Gravity` | ✅ 使用 | ❌ 不使用 | 重力加速度 |
 | `Density` | ❌ 不使用 | ✅ 使用 | 流体密度 |
 | `Viscosity` | 0.01-0.1 | 0.001-0.5 | 粘度系数 |
@@ -71,7 +67,12 @@ Substeps = 1;
 ## 常见问题
 
 ### Q: 如何切换求解器？
-A: 运行时修改 `Config.SolverType` 即可，会在下一帧生效。
+A: 运行时改对应层的 `bEnabled`（如 `Config.ShallowWater.bEnabled = false`），会在下一帧生效。
+
+### Q: 如何让多种流体同时存在？
+A: 每层各有一份独立配置（`Config.ShallowWater` / `NavierStokes` / `MaskAccumulate`，各有自己的
+`GridSize` / `WorldSize` / `TimeStep` / `Fluid2DLevel` / Flow 噪声），把需要的层 `bEnabled` 打开即可；
+材质里用 `Scene.Fluid2DSimulation.Fluid2DShallowWaterNormalMapTexture` 这类按类型命名的字段分别采样。
 
 ### Q: 哪个求解器更快？
 A: 浅水方程快3-4倍。
@@ -141,15 +142,15 @@ void AMyGameMode::BeginPlay()
     
     // 根据需求选择配置
     #if PLATFORM_MOBILE
-        Fluid2D->FluidConfig.SolverType = EFluidSolverType::ShallowWater;
-        Fluid2D->FluidConfig.GridSize = 128;
+        Fluid2D->FluidConfig.ShallowWater.bEnabled = true;
+        Fluid2D->FluidConfig.ShallowWater.GridSize = 128;
     #else
-        Fluid2D->FluidConfig.SolverType = EFluidSolverType::NavierStokes;
-        Fluid2D->FluidConfig.GridSize = 256;
+        Fluid2D->FluidConfig.NavierStokes.bEnabled = true;
+        Fluid2D->FluidConfig.NavierStokes.GridSize = 256;
     #endif
     
-    Fluid2D->FluidConfig.Viscosity = 0.02f;
-    Fluid2D->FluidConfig.Damping = 0.05f;
+    Fluid2D->FluidConfig.NavierStokes.Viscosity = 0.02f;
+    Fluid2D->FluidConfig.NavierStokes.Damping = 0.05f;
     Fluid2D->bEnableSimulation = true;
 }
 ```

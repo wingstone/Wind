@@ -10,6 +10,19 @@ UFluid2DFluidConfigComponent::UFluid2DFluidConfigComponent()
 	bAutoActivate = true;
 }
 
+const FFluid2DSolverConfigBase& UFluid2DFluidConfigComponent::GetSolverConfig() const
+{
+	switch (SolverType)
+	{
+	case EFluidSolverType::NavierStokes:
+		return NavierStokes;
+	case EFluidSolverType::MaskAccumulate:
+		return MaskAccumulate;
+	default:
+		return ShallowWater;
+	}
+}
+
 void UFluid2DFluidConfigComponent::BeginPlay()
 {
 	Super::BeginPlay();

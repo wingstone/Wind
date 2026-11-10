@@ -24,7 +24,47 @@ Fluid2DSystem 插件提供了两种基于物理的 2D 流体模拟方法，用�
 - **GPU 加速**：两种求解器均使用计算着色器在 GPU 上进行
 - **玩家交互**：自动处理玩家进入水体、游泳、产生波浪等效果
 - **物理反馈**：浮力、水阻、波浪力等物理效果
-- **可切换**：运行时可在两种求解器间切换
+- **可并存**：每种求解器各有一份独立配置（`FluidConfig.ShallowWater` / `NavierStokes` / `MaskAccumulate`），可同时启用
+
+### 多种流体同时存在
+
+`EFluidSolverType` 的取值不是互斥的：`FFluid2DFluidConfig` 为每种求解器保存一份**完全独立**的配置
+（`FSWFluidConfig` / `FNSFluidConfig` / `FMAFluidConfig`，都派生自 `FFluid2DSolverConfigBase`），
+每份配置都有自己的网格、世界尺寸、时间步、静止液位、流场噪声与求解器参数。启用几种求解器，
+渲染端就有几套彼此独立的模拟层并行模拟：
+
+```cpp
+UFluid2DSubsystem* Fluid2DSys = GetWorld()->GetSubsystem<UFluid2DSubsystem>();
+
+// 浅水层：大网格、大范围
+FSWFluidConfig& Water = Fluid2DSys->FluidConfig.ShallowWater;
+Water.bEnabled = true;
+Water.GridSize = 512;
+Water.WorldSize = 20000.0f;
+
+// Navier-Stokes 层：小网格、小范围（烟雾/细节）
+FNSFluidConfig& Smoke = Fluid2DSys->FluidConfig.NavierStokes;
+Smoke.bEnabled = true;
+Smoke.GridSize = 128;
+Smoke.WorldSize = 4000.0f;
+
+// 运行时关闭某一层（该层的 GPU 资源会被释放）
+Fluid2DSys->FluidConfig.MaskAccumulate.bEnabled = false;
+```
+
+- **按层独立**：网格尺寸、世界尺寸、时间步、`Fluid2DLevel`、Flow 噪声（纹理/缩放/强度）、求解器参数
+  全部逐层独立；滚动网格与流场体积也按层各自计算（`AFluid2DFlowVolume::TargetSolverTypes` 控制驱动哪几层）。
+- **权威配置只有一份**：`UFluid2DSubsystem::FluidConfig`，等于项目设置 `DefaultFluidConfig`
+  叠加各 `UFluid2DFluidConfigComponent` 的逐层覆盖。
+- **配置组件按层拆分**：`UFluid2DFluidConfigComponent::SolverType` 选定层，只有对应那个配置结构会被应用，
+  每层放一个组件即可单独调参。
+- **交互可定向**：`UFluid2DInteractionComponent::TargetSolverTypes` 为空表示作用于全部启用层，
+  填写后只影响指定层；`IsSubmergedIn(EFluidSolverType)` 可查询某层的浸没状态。
+- **材质按层采样**：`Scene.Fluid2DSimulation.Fluid2D<Type>UVScaleOffset` /
+  `Fluid2D<Type>MapSizeAndInv` / `Fluid2D<Type>{Height,Velocity,Normal}MapTexture`
+  （`<Type>` = `ShallowWater` / `NavierStokes` / `MaskAccumulate`），共用 `Fluid2DSimulation.Fluid2DFieldSampler`。
+- **旧字段保持兼容**：`UVScaleOffset` / `Fluid2DMapSizeAndInv` / `Fluid2D{Normal,Height,Velocity}MapTexture`
+  指向 `GetPrimarySolverType()`（索引最小的已启用层），旧的单流体材质无需修改。
 
 ## 核心组件
 
@@ -33,15 +73,17 @@ Fluid2DSystem 插件提供了两种基于物理的 2D 流体模拟方法，用�
 ```cpp
 UFluid2DSubsystem* Fluid2DSys = GetWorld()->GetSubsystem<UFluid2DSubsystem>();
 
-// 选择求解器类型
-Fluid2DSys->FluidConfig.SolverType = EFluidSolverType::ShallowWater;  // 或 NavierStokes
+// 每种求解器一份独立配置：启用并调参浅水层
+FSWFluidConfig& Water = Fluid2DSys->FluidConfig.ShallowWater;
+Water.bEnabled = true;
+Water.GridSize = 256;        // 网格大小
+Water.WorldSize = 10000.0f;  // 世界尺寸 (cm)
+Water.TimeStep = 0.016f;     // 时间步
+Water.AdvectionDamping = 0.99f;
 
-// 配置流体参数
-Fluid2DSys->FluidConfig.GridSize = 256;        // 网格大小
-Fluid2DSys->FluidConfig.WorldSize = 10000.0f;  // 世界尺寸 (cm)
-Fluid2DSys->FluidConfig.Gravity = 980.0f;      // 重力加速度 (仅浅水方程使用)
-Fluid2DSys->FluidConfig.Viscosity = 0.1f;      // 粘度
-Fluid2DSys->FluidConfig.Damping = 0.05f;       // 阻尼
+// Navier-Stokes 层参数（启用后独立模拟）
+Fluid2DSys->FluidConfig.NavierStokes.Viscosity = 0.1f;
+Fluid2DSys->FluidConfig.NavierStokes.Damping = 0.05f;
 
 // 创建水花
 Fluid2DSys->CreateSplash(FVector2D(0, 0), 100.0f, 200.0f);
@@ -187,17 +229,17 @@ void AMyGameMode::ConfigureFluid2DSystem()
     UFluid2DSubsystem* Fluid2DSys = GetWorld()->GetSubsystem<UFluid2DSubsystem>();
     
     // 使用浅水方程求解器（快速，适合大场景）
-    Fluid2DSys->FluidConfig.SolverType = EFluidSolverType::ShallowWater;
+    Fluid2DSys->FluidConfig.ShallowWater.bEnabled = true;
     Fluid2DSys->FluidConfig.Gravity = 980.0f;  // 浅水方程使用重力
     
     // 或者使用Navier-Stokes求解器（精确，适合细节）
-    // Fluid2DSys->FluidConfig.SolverType = EFluidSolverType::NavierStokes;
+    // Fluid2DSys->FluidConfig.NavierStokes.bEnabled = true;
     // Fluid2DSys->FluidConfig.Density = 1.0f;  // NS需要密度参数
     
     // 通用参数
-    Fluid2DSys->FluidConfig.GridSize = 256;
-    Fluid2DSys->FluidConfig.Viscosity = 0.05f;
-    Fluid2DSys->FluidConfig.Damping = 0.02f;
+    Fluid2DSys->FluidConfig.NavierStokes.GridSize = 256;
+    Fluid2DSys->FluidConfig.NavierStokes.Viscosity = 0.05f;
+    Fluid2DSys->FluidConfig.NavierStokes.Damping = 0.02f;
 }
 ```
 
@@ -245,8 +287,8 @@ void ADebugActor::ConfigureFluidSolver()
     // 场景1：大型水面 (推荐浅水方程)
     if (bLargeFluid2DBody)
     {
-        Fluid2DSys->FluidConfig.SolverType = EFluidSolverType::ShallowWater;
-        Fluid2DSys->FluidConfig.GridSize = 512;  // 可以使用更大的网格
+        Fluid2DSys->FluidConfig.ShallowWater.bEnabled = true;
+        Fluid2DSys->FluidConfig.ShallowWater.GridSize = 512;  // 可以使用更大的网格
         Fluid2DSys->SimulationSubsteps = 1;      // 单次迭代即可
         Fluid2DSys->FluidConfig.Gravity = 980.0f;
         UE_LOG(LogTemp, Log, TEXT("Using Shallow Water solver for performance"));
@@ -255,8 +297,8 @@ void ADebugActor::ConfigureFluidSolver()
     // 场景2：精细流体效果 (推荐Navier-Stokes)
     else
     {
-        Fluid2DSys->FluidConfig.SolverType = EFluidSolverType::NavierStokes;
-        Fluid2DSys->FluidConfig.GridSize = 256;  // 中等网格
+        Fluid2DSys->FluidConfig.NavierStokes.bEnabled = true;
+        Fluid2DSys->FluidConfig.NavierStokes.GridSize = 256;  // 中等网格
         Fluid2DSys->SimulationSubsteps = 4;      // 需要多次迭代求解压力
         Fluid2DSys->FluidConfig.Density = 1.0f;
         UE_LOG(LogTemp, Log, TEXT("Using Navier-Stokes solver for accuracy"));
@@ -314,18 +356,18 @@ void AFloatingObject::Tick(float DeltaTime)
 ### 空间优化
 ```cpp
 // 浅水方程：可以使用更大的网格
-if (Config.SolverType == EFluidSolverType::ShallowWater)
+if (Config.IsSolverTypeEnabled(EFluidSolverType::ShallowWater))
 {
-    Fluid2DSys->FluidConfig.GridSize = 512;        // 大网格性能仍可接受
-    Fluid2DSys->FluidConfig.WorldSize = 20000.0f;  // 大范围
+    Fluid2DSys->FluidConfig.ShallowWater.GridSize = 512;        // 大网格性能仍可接受
+    Fluid2DSys->FluidConfig.ShallowWater.WorldSize = 20000.0f;  // 大范围
     Fluid2DSys->SimulationSubsteps = 1;            // 单次迭代
 }
 
 // Navier-Stokes：需要适度网格
 else
 {
-    Fluid2DSys->FluidConfig.GridSize = 256;        // 中等网格
-    Fluid2DSys->FluidConfig.WorldSize = 10000.0f;  // 中等范围
+    Fluid2DSys->FluidConfig.ShallowWater.GridSize = 256;        // 中等网格
+    Fluid2DSys->FluidConfig.ShallowWater.WorldSize = 10000.0f;  // 中等范围
     Fluid2DSys->SimulationSubsteps = 4;            // 压力求解需要多次迭代
 }
 ```
@@ -333,8 +375,8 @@ else
 ### 移动平台优化
 ```cpp
 // 移动设备建议配置
-Fluid2DSys->FluidConfig.SolverType = EFluidSolverType::ShallowWater;  // 性能优先
-Fluid2DSys->FluidConfig.GridSize = 128;  // 降低分辨率
+Fluid2DSys->FluidConfig.ShallowWater.bEnabled = true;  // 性能优先
+Fluid2DSys->FluidConfig.ShallowWater.GridSize = 128;  // 降低分辨率
 Fluid2DSys->SimulationSubsteps = 1;      // 最少迭代
 ```
 
@@ -346,19 +388,13 @@ Fluid2DSys->SimulationSubsteps = 1;      // 最少迭代
 
 #### 真实海洋波浪
 ```cpp
-Config.SolverType = EFluidSolverType::ShallowWater;
-Config.Gravity = 980.0f;    // 地球重力
-Config.Viscosity = 0.01f;   // 低粘度（水）
-Config.Damping = 0.02f;     // 低阻尼（波浪持续）
-Config.GridSize = 512;      // 大网格
+Config.ShallowWater.bEnabled = true;
+Config.ShallowWater.GridSize = 512;      // 大网格
 ```
 
 #### 平静池塘
 ```cpp
-Config.SolverType = EFluidSolverType::ShallowWater;
-Config.Gravity = 980.0f;
-Config.Viscosity = 0.05f;   // 中等粘度
-Config.Damping = 0.1f;      // 较高阻尼（快速平静）
+Config.ShallowWater.bEnabled = true;
 ```
 
 ---
@@ -367,28 +403,25 @@ Config.Damping = 0.1f;      // 较高阻尼（快速平静）
 
 #### 真实水体（精确模拟）
 ```cpp
-Config.SolverType = EFluidSolverType::NavierStokes;
-Config.Density = 1.0f;         // 水的密度
-Config.Viscosity = 0.01f;      // 低粘度
-Config.Damping = 0.01f;        // 极低阻尼
+Config.NavierStokes.bEnabled = true;
+Config.NavierStokes.Viscosity = 0.01f;      // 低粘度
+Config.NavierStokes.Damping = 0.01f;        // 极低阻尼
 Fluid2DSys->SimulationSubsteps = 5;  // 较多迭代保证精度
 ```
 
 #### 粘稠液体（蜂蜜、油）
 ```cpp
-Config.SolverType = EFluidSolverType::NavierStokes;
-Config.Density = 1.4f;         // 更高密度
-Config.Viscosity = 0.5f;       // 高粘度
-Config.Damping = 0.05f;
+Config.NavierStokes.bEnabled = true;
+Config.NavierStokes.Viscosity = 0.5f;       // 高粘度
+Config.NavierStokes.Damping = 0.05f;
 Fluid2DSys->SimulationSubsteps = 8;  // 高粘度需要更多迭代
 ```
 
 #### 烟雾效果
 ```cpp
-Config.SolverType = EFluidSolverType::NavierStokes;
-Config.Density = 0.001f;       // 极低密度
-Config.Viscosity = 0.001f;     // 极低粘度
-Config.Damping = 0.05f;        // 中等阻尼（烟雾扩散）
+Config.NavierStokes.bEnabled = true;
+Config.NavierStokes.Viscosity = 0.001f;     // 极低粘度
+Config.NavierStokes.Damping = 0.05f;        // 中等阻尼（烟雾扩散）
 ```
 
 ---
@@ -397,9 +430,8 @@ Config.Damping = 0.05f;        // 中等阻尼（烟雾扩散）
 
 #### 快速衰减（性能优先）
 ```cpp
-Config.SolverType = EFluidSolverType::ShallowWater;
-Config.Damping = 0.2f;         // 快速消失的波浪
-Config.GridSize = 128;         // 小网格
+Config.ShallowWater.bEnabled = true;
+Config.ShallowWater.GridSize = 128;         // 小网格
 Fluid2DSys->SimulationSubsteps = 1;
 ```
 

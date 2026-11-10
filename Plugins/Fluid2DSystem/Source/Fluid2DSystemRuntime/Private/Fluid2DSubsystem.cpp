@@ -22,6 +22,12 @@ class FFluid2DFieldSceneExtension;
 
 UFluid2DSubsystem::UFluid2DSubsystem()
 {
+	// FIntVector2 has no initializing default constructor.
+	for (FIntVector2& LastScrollTargetLocation : LastScrollTargetLocationInts)
+	{
+		LastScrollTargetLocation = FIntVector2::ZeroValue;
+	}
+
 #if WITH_EDITOR
 	UFluid2DSystemSettings::OnSettingsChange.AddUObject(this, &UFluid2DSubsystem::LoadGlobalFluidConfig);
 #endif
@@ -32,12 +38,14 @@ void UFluid2DSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Super::Initialize(Collection);
 
 	const UFluid2DSystemSettings* Settings = UFluid2DSystemSettings::Get();
-	FluidConfig = Settings->DefaultFluidConfig;
+	DefaultFluidConfig = Settings->DefaultFluidConfig;
+	FluidConfig = DefaultFluidConfig;
 
 	ResetState();
 
-	UE_LOG(LogFluid2DSystem, Log, TEXT("Fluid2DSubsystem initialized - GridSize: %d, WorldSize: %.1f"), 
-		FluidConfig.GridSize, FluidConfig.WorldSize);
+	const UEnum* SolverTypeEnum = StaticEnum<EFluidSolverType>();
+	const FString PrimarySolverName = SolverTypeEnum->GetNameStringByValue(Fluid2DSolverType::ToIndex(FluidConfig.GetPrimarySolverType()));
+	UE_LOG(LogFluid2DSystem, Log, TEXT("Fluid2DSubsystem initialized - primary solver: %s"), *PrimarySolverName);
 }
 
 void UFluid2DSubsystem::Deinitialize()
@@ -49,7 +57,7 @@ void UFluid2DSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	if (!FluidConfig.bEnableSimulation)
+	if (!FluidConfig.HasEnabledSolverType())
 		return;
 
 	ScrollWorldGrid();
@@ -161,77 +169,108 @@ FVector UFluid2DSubsystem::GetSampleLocation() const
 
 void UFluid2DSubsystem::ScrollWorldGrid()
 {
-	const FVector ScrollTargetLocation = GetSampleLocation();
-	FIntVector2 ScrollTargetLocationInt = FIntVector2(FMath::RoundToInt(ScrollTargetLocation.X), FMath::RoundToInt(ScrollTargetLocation.Y));
-	
-	// Update scrolling origin if view has moved significantly to maintain precision
-	FIntVector2 ViewDelta = ScrollTargetLocationInt - LastScrollTargetLocationInt;
-	int32 MaxOffset = FMath::Max(FMath::Abs(ViewDelta.X), FMath::Abs(ViewDelta.Y));
-	if (MaxOffset > FluidConfig.WorldSize * 0.25f)
+	if (!GetWorld() || !GetWorld()->Scene)
 	{
-		if (GetWorld() && GetWorld()->Scene)
-		{
-			FIntVector2 ScrollOffset = ScrollTargetLocationInt - LastScrollTargetLocationInt;
-
-			const uint32 GridSize = FMath::Max(FluidConfig.GridSize, 1);
-			const float CellSize = FluidConfig.WorldSize / static_cast<float>(GridSize);
-
-			FIntVector2 GridScrollOffset = FIntVector2(
-				FMath::RoundToInt32(ScrollOffset.X / CellSize),
-				FMath::RoundToInt32(ScrollOffset.Y / CellSize));
-
-			ENQUEUE_RENDER_COMMAND(ScrollOffset)(
-			[WorldScene = GetWorld()->Scene, GridScrollOffset = GridScrollOffset](FRHICommandListImmediate& RHICmdList)
-				{
-					if (WorldScene->GetRenderScene())
-					{
-						if (FFluid2DFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FFluid2DFieldSceneExtension>())
-						{
-							UE_LOG(LogFluid2DSystem, Log, TEXT("Scroll offset on render thread"));
-							SceneExtension->SetScrollOffset_RenderThread(GridScrollOffset);
-						}
-					}
-				});
-
-			LastScrollTargetLocationInt = ScrollTargetLocationInt;
-		}
+		return;
 	}
-}
 
-void UFluid2DSubsystem::UpdateFluidConfig()
-{
-	if (GetWorld() && GetWorld()->Scene)
+	const FVector ScrollTargetLocation = GetSampleLocation();
+	const FIntVector2 ScrollTargetLocationInt(FMath::RoundToInt(ScrollTargetLocation.X), FMath::RoundToInt(ScrollTargetLocation.Y));
+
+	// Every layer owns its grid, so each one is scrolled with its own cell size and threshold.
+	for (int32 SolverIndex = 0; SolverIndex < Fluid2DSolverType::Count; ++SolverIndex)
 	{
-		FFluid2DFluidConfig ApplyFluidConfig = FluidConfig;
-		if (RegisteredFluidConfigComponents.Num() > 0 && RegisteredFluidConfigComponents[0])
+		const EFluidSolverType SolverType = Fluid2DSolverType::FromIndex(SolverIndex);
+		if (!FluidConfig.IsSolverTypeEnabled(SolverType))
 		{
-			// For now just take the first registered config component, we can blend them later if needed.
-			// The project-settings default (loaded in Initialize / LoadGlobalFluidConfig) is used when no component is registered.
-			ApplyFluidConfig = RegisteredFluidConfigComponents[0]->GetFluidConfig();
+			continue;
 		}
 
-		// Keep the CPU-side FluidConfig in sync with what we push to the render thread so game-thread readers
-		// (e.g. UFluid2DInteractionComponent::IsSubmerged, ScrollWorldGrid) observe the currently-effective config.
-		FluidConfig = ApplyFluidConfig;
+		const FFluid2DSolverConfigBase& LayerConfig = FluidConfig.GetSolverConfig(SolverType);
+		const FIntVector2 ViewDelta = ScrollTargetLocationInt - LastScrollTargetLocationInts[SolverIndex];
+		const int32 MaxOffset = FMath::Max(FMath::Abs(ViewDelta.X), FMath::Abs(ViewDelta.Y));
+		if (MaxOffset <= LayerConfig.WorldSize * 0.25f)
+		{
+			continue;
+		}
 
-		ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
-		[WorldScene = GetWorld()->Scene, FluidConfig = ApplyFluidConfig](FRHICommandListImmediate& RHICmdList)
+		const uint32 GridSize = FMath::Max(LayerConfig.GridSize, 1);
+		const float CellSize = LayerConfig.WorldSize / static_cast<float>(GridSize);
+
+		const FIntVector2 GridScrollOffset = FIntVector2(
+			FMath::RoundToInt32(ViewDelta.X / CellSize),
+			FMath::RoundToInt32(ViewDelta.Y / CellSize));
+
+		ENQUEUE_RENDER_COMMAND(ScrollOffset)(
+		[WorldScene = GetWorld()->Scene, SolverType, GridScrollOffset](FRHICommandListImmediate& RHICmdList)
 			{
 				if (WorldScene->GetRenderScene())
 				{
 					if (FFluid2DFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FFluid2DFieldSceneExtension>())
 					{
-						UE_LOG(LogFluid2DSystem, Log, TEXT("Updating fluid config on render thread"));
-						SceneExtension->SetConfig_RenderThread(FluidConfig);
+						UE_LOG(LogFluid2DSystem, Verbose, TEXT("Scroll offset on render thread"));
+						SceneExtension->SetScrollOffset_RenderThread(SolverType, GridScrollOffset);
 					}
 				}
 			});
+
+		LastScrollTargetLocationInts[SolverIndex] = ScrollTargetLocationInt;
 	}
+}
+
+void UFluid2DSubsystem::UpdateFluidConfig()
+{
+	if (!GetWorld() || !GetWorld()->Scene)
+	{
+		return;
+	}
+
+	// Start from the project-settings defaults, then let every registered component override its own layer.
+	FFluid2DFluidConfig ApplyFluidConfig = DefaultFluidConfig;
+	for (const UFluid2DFluidConfigComponent* ConfigComponent : RegisteredFluidConfigComponents)
+	{
+		if (!ConfigComponent)
+		{
+			continue;
+		}
+
+		switch (ConfigComponent->SolverType)
+		{
+		case EFluidSolverType::ShallowWater:
+			ApplyFluidConfig.ShallowWater = ConfigComponent->ShallowWater;
+			break;
+		case EFluidSolverType::NavierStokes:
+			ApplyFluidConfig.NavierStokes = ConfigComponent->NavierStokes;
+			break;
+		case EFluidSolverType::MaskAccumulate:
+			ApplyFluidConfig.MaskAccumulate = ConfigComponent->MaskAccumulate;
+			break;
+		default:
+			break;
+		}
+	}
+
+	// Keep the CPU-side FluidConfig in sync with what we push to the render thread so game-thread readers
+	// (e.g. UFluid2DInteractionComponent::IsSubmerged, ScrollWorldGrid) observe the currently-effective config.
+	FluidConfig = ApplyFluidConfig;
+
+	ENQUEUE_RENDER_COMMAND(UpdateFluidConfig)(
+	[WorldScene = GetWorld()->Scene, FluidConfig = ApplyFluidConfig](FRHICommandListImmediate& RHICmdList)
+		{
+			if (WorldScene->GetRenderScene())
+			{
+				if (FFluid2DFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FFluid2DFieldSceneExtension>())
+				{
+					UE_LOG(LogFluid2DSystem, Verbose, TEXT("Updating fluid config on render thread"));
+					SceneExtension->SetConfig_RenderThread(FluidConfig);
+				}
+			}
+		});
 }
 
 void UFluid2DSubsystem::LoadGlobalFluidConfig(const UFluid2DSystemSettings* Settings, EPropertyChangeType::Type ChangeType)
 {
-	FluidConfig = Settings->DefaultFluidConfig;
+	DefaultFluidConfig = Settings->DefaultFluidConfig;
 	ResetState();
 }
 
@@ -271,49 +310,58 @@ void UFluid2DSubsystem::UpdateGlobalFlow()
 		return;
 	}
 
-	// Resolve which fluid config is currently in effect for texture / tiling / noise-modulation.
-	const FFluid2DFluidConfig& ActiveConfig = (RegisteredFluidConfigComponents.Num() > 0 && RegisteredFluidConfigComponents[0])
-		? RegisteredFluidConfigComponents[0]->FluidConfig
-		: FluidConfig;
+	const FVector SampleLocation = GetSampleLocation();
 
-	FFluid2DGlobalFlowData FlowData;
-
-	float BlendWeight = 0.0f;
-	if (AFluid2DFlowVolume* Volume = ResolveFlowVolumeAt(GetSampleLocation(), BlendWeight))
+	// Flow noise, tiling and the driving volume are resolved per layer: each layer has its own flow config.
+	for (int32 SolverIndex = 0; SolverIndex < Fluid2DSolverType::Count; ++SolverIndex)
 	{
-		const float SpeedWeighted = Volume->Speed * BlendWeight;
-		FlowData.FlowDirection = Volume->FlowDirection.GetSafeNormal();
-		FlowData.FlowNoiseIntensityMin = ActiveConfig.FlowNoiseIntensityMin * SpeedWeighted;
-		FlowData.FlowNoiseIntensityMax = ActiveConfig.FlowNoiseIntensityMax * SpeedWeighted;
-	}
-
-	FlowData.FlowNoiseTiling = ActiveConfig.FlowNoiseTiling;
-	if (ActiveConfig.FlowNoiseTexture && ActiveConfig.FlowNoiseTexture->GetResource())
-	{
-		FlowData.FlowNoiseTextureRHI = ActiveConfig.FlowNoiseTexture->GetResource()->TextureRHI;
-	}
-
-	ENQUEUE_RENDER_COMMAND(UpdateGlobalFlow)(
-	[WorldScene = GetWorld()->Scene, FlowData = MoveTemp(FlowData)](FRHICommandListImmediate& RHICmdList)
+		const EFluidSolverType SolverType = Fluid2DSolverType::FromIndex(SolverIndex);
+		if (!FluidConfig.IsSolverTypeEnabled(SolverType))
 		{
-			if (WorldScene->GetRenderScene())
+			continue;
+		}
+
+		const FFluid2DSolverConfigBase& LayerConfig = FluidConfig.GetSolverConfig(SolverType);
+
+		FFluid2DGlobalFlowData FlowData;
+		FlowData.FlowNoiseTiling = LayerConfig.FlowNoiseTiling;
+
+		float BlendWeight = 0.0f;
+		if (AFluid2DFlowVolume* Volume = ResolveFlowVolumeAt(SampleLocation, SolverType, BlendWeight))
+		{
+			const float SpeedWeighted = Volume->Speed * BlendWeight;
+			FlowData.FlowDirection = Volume->FlowDirection.GetSafeNormal();
+			FlowData.FlowNoiseIntensityMin = LayerConfig.FlowNoiseIntensityMin * SpeedWeighted;
+			FlowData.FlowNoiseIntensityMax = LayerConfig.FlowNoiseIntensityMax * SpeedWeighted;
+		}
+
+		if (LayerConfig.FlowNoiseTexture && LayerConfig.FlowNoiseTexture->GetResource())
+		{
+			FlowData.FlowNoiseTextureRHI = LayerConfig.FlowNoiseTexture->GetResource()->TextureRHI;
+		}
+
+		ENQUEUE_RENDER_COMMAND(UpdateGlobalFlow)(
+		[WorldScene = GetWorld()->Scene, SolverType, FlowData = MoveTemp(FlowData)](FRHICommandListImmediate& RHICmdList)
 			{
-				if (FFluid2DFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FFluid2DFieldSceneExtension>())
+				if (WorldScene->GetRenderScene())
 				{
-					SceneExtension->SetGlobalFlowData_RenderThread(FlowData);
+					if (FFluid2DFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FFluid2DFieldSceneExtension>())
+					{
+						SceneExtension->SetGlobalFlowData_RenderThread(SolverType, FlowData);
+					}
 				}
-			}
-		});
+			});
+	}
 }
 
-AFluid2DFlowVolume* UFluid2DSubsystem::ResolveFlowVolumeAt(const FVector& WorldPos, float& OutBlendWeight) const
+AFluid2DFlowVolume* UFluid2DSubsystem::ResolveFlowVolumeAt(const FVector& WorldPos, EFluidSolverType SolverType, float& OutBlendWeight) const
 {
 	// Priority-first, break at first hit. Volumes are kept ordered by InsertFlowVolume so
 	// higher-priority bounded volumes are tried first; unbound volumes at the tail act as fallbacks.
 	OutBlendWeight = 0.0f;
 	for (AFluid2DFlowVolume* Volume : FlowVolumes)
 	{
-		if (!Volume || !Volume->bEnabled)
+		if (!Volume || !Volume->bEnabled || !Volume->AppliesTo(SolverType))
 		{
 			continue;
 		}
@@ -343,8 +391,13 @@ AFluid2DFlowVolume* UFluid2DSubsystem::ResolveFlowVolumeAt(const FVector& WorldP
 
 FVector2D UFluid2DSubsystem::GetFlowVelocityAt(const FVector& WorldPos) const
 {
+	return GetFlowVelocityAt(WorldPos, FluidConfig.GetPrimarySolverType());
+}
+
+FVector2D UFluid2DSubsystem::GetFlowVelocityAt(const FVector& WorldPos, EFluidSolverType SolverType) const
+{
 	float BlendWeight = 0.0f;
-	AFluid2DFlowVolume* Volume = ResolveFlowVolumeAt(WorldPos, BlendWeight);
+	AFluid2DFlowVolume* Volume = ResolveFlowVolumeAt(WorldPos, SolverType, BlendWeight);
 	if (!Volume)
 	{
 		return FVector2D::ZeroVector;

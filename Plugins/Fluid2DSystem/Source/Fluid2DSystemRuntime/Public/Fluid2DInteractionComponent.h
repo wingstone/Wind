@@ -27,6 +27,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid2D Interaction Control")
 	bool bEnableInteraction = true;
 
+	/**
+	 * Solver layers this component interacts with.
+	 * Empty = every enabled layer, so an object disturbs all coexisting fluids by default.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid2D Interaction Control")
+	TSet<EFluidSolverType> TargetSolverTypes;
+
 	/** Minimum speed required to generate interaction effects */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid2D Interaction Control")
 	float MinSpeedForInteraction = 10.0f;
@@ -85,6 +92,14 @@ public:
 	FFluid2DInteractionData GetCurrentInteractionData() const { return CurrentInteractionData; }
 	bool IsInteractionUseful() const { return bEnableInteraction && bIsInteractionUseful; }
 
+	/** True when the component is below the rest level of the given solver layer. */
+	UFUNCTION(BlueprintPure, Category = "Fluid2D Interaction Control")
+	bool IsSubmergedIn(EFluidSolverType SolverType) const;
+
+	/** True when the component is below the rest level of at least one targeted solver layer. */
+	UFUNCTION(BlueprintPure, Category = "Fluid2D Interaction Control")
+	bool IsSubmerged() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -100,6 +115,9 @@ private:
 	void UnregisterFromSubsystem();
 	
 	void UpdateInteraction(float DeltaTime);
-	bool IsSubmerged(FVector CurrentPosition) const;
+	bool IsSubmergedAt(const FVector& Position) const;
+
+	/** Solver layer whose flow drives the relative-velocity calculation: lowest enabled target layer, else the primary one. */
+	EFluidSolverType GetFlowSolverType(const UFluid2DSubsystem* Fluid2DSys) const;
 	UFluid2DSubsystem* GetFluid2DSubsystem() const;
 };

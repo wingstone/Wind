@@ -153,13 +153,10 @@ GPU缓冲区：
 ### 场景1：开放世界游戏的海洋
 ```cpp
 // 使用浅水方程
-Config.SolverType = EFluidSolverType::ShallowWater;
-Config.GridSize = 512;
-Config.WorldSize = 50000.0f;  // 500米范围
-Config.Gravity = 980.0f;
-Config.Viscosity = 0.01f;
-Config.Damping = 0.02f;
-Substeps = 1;
+Config.ShallowWater.bEnabled = true;
+Config.ShallowWater.GridSize = 512;
+Config.ShallowWater.WorldSize = 50000.0f;  // 500米范围
+Config.ShallowWater.SimulationSubsteps = 1;
 
 // 性能：60 FPS @ GTX 1060
 ```
@@ -167,13 +164,12 @@ Substeps = 1;
 ### 场景2：室内精细水池
 ```cpp
 // 使用Navier-Stokes
-Config.SolverType = EFluidSolverType::NavierStokes;
-Config.GridSize = 256;
-Config.WorldSize = 5000.0f;  // 50米范围
-Config.Density = 1.0f;
-Config.Viscosity = 0.02f;
-Config.Damping = 0.01f;
-Substeps = 4;
+Config.NavierStokes.bEnabled = true;
+Config.NavierStokes.GridSize = 256;
+Config.NavierStokes.WorldSize = 5000.0f;  // 50米范围
+Config.NavierStokes.Viscosity = 0.02f;
+Config.NavierStokes.Damping = 0.01f;
+Config.NavierStokes.SimulationSubsteps = 4;
 
 // 性能：60 FPS @ RTX 3060
 ```
@@ -181,25 +177,21 @@ Substeps = 4;
 ### 场景3：2D侧视角游戏
 ```cpp
 // 使用浅水方程（高度信息直观）
-Config.SolverType = EFluidSolverType::ShallowWater;
-Config.GridSize = 256;
-Config.WorldSize = 10000.0f;
-Config.Gravity = 980.0f;
-Config.Viscosity = 0.05f;
-Config.Damping = 0.1f;
-Substeps = 1;
+Config.ShallowWater.bEnabled = true;
+Config.ShallowWater.GridSize = 256;
+Config.ShallowWater.WorldSize = 10000.0f;
+Config.ShallowWater.SimulationSubsteps = 1;
 ```
 
 ### 场景4：烟雾效果
 ```cpp
 // 使用Navier-Stokes（涡旋很重要）
-Config.SolverType = EFluidSolverType::NavierStokes;
-Config.GridSize = 128;  // 烟雾可用小网格
-Config.WorldSize = 5000.0f;
-Config.Density = 0.001f;  // 气体密度很低
-Config.Viscosity = 0.001f;
-Config.Damping = 0.05f;
-Substeps = 3;
+Config.NavierStokes.bEnabled = true;
+Config.NavierStokes.GridSize = 128;  // 烟雾可用小网格
+Config.NavierStokes.WorldSize = 5000.0f;
+Config.NavierStokes.Viscosity = 0.001f;
+Config.NavierStokes.Damping = 0.05f;
+Config.NavierStokes.SimulationSubsteps = 3;
 ```
 
 ---

@@ -60,7 +60,7 @@ void UFluid2DInteractionComponent::UpdateInteraction(float DeltaTime)
 {
 	FVector CurrentPosition = GetComponentLocation();
 	FVector CurrentVelocity = (CurrentPosition - LastPosition) / DeltaTime;
-	bool bIsSubmerged = IsSubmerged(CurrentPosition);
+	bool bIsSubmerged = IsSubmergedAt(CurrentPosition);
 
 	// Continuous wave generation
 	if (bIsSubmerged)
@@ -71,7 +71,7 @@ void UFluid2DInteractionComponent::UpdateInteraction(float DeltaTime)
 		FVector2D FlowVelocity2D = FVector2D::ZeroVector;
 		if (UFluid2DSubsystem* Fluid2DSys = GetFluid2DSubsystem())
 		{
-			FlowVelocity2D = Fluid2DSys->GetFlowVelocityAt(CurrentPosition);
+			FlowVelocity2D = Fluid2DSys->GetFlowVelocityAt(CurrentPosition, GetFlowSolverType(Fluid2DSys));
 		}
 		const FVector2D RelativeVelocity2D = Velocity2D - FlowVelocity2D;
 		const float NewComponentVelocity = RelativeVelocity2D.Size();
@@ -90,6 +90,7 @@ void UFluid2DInteractionComponent::UpdateInteraction(float DeltaTime)
 			CurrentInteractionData.PowerFalloff = PowerFalloff;
 			CurrentInteractionData.ShapeType = ShapeType;
 			CurrentInteractionData.EmissionType = EmissionType;
+			CurrentInteractionData.TargetSolverTypes = TargetSolverTypes;
 		}
 		else
 		{
@@ -102,17 +103,72 @@ void UFluid2DInteractionComponent::UpdateInteraction(float DeltaTime)
 	}
 }
 
-bool UFluid2DInteractionComponent::IsSubmerged(FVector CurrentPosition) const
+bool UFluid2DInteractionComponent::IsSubmergedIn(EFluidSolverType SolverType) const
 {
-	if (UFluid2DSubsystem* Fluid2DSys = GetFluid2DSubsystem())
+	const UFluid2DSubsystem* Fluid2DSys = GetFluid2DSubsystem();
+	if (!Fluid2DSys || !Fluid2DSys->IsSolverTypeEnabled(SolverType))
 	{
-		const FFluid2DFluidConfig& Config = Fluid2DSys->FluidConfig;
-		return CurrentPosition.Z < Config.Fluid2DLevel;
+		return false;
 	}
-	
-	return CurrentPosition.Z < 0;
+
+	return GetComponentLocation().Z < Fluid2DSys->GetFluidLevel(SolverType);
+}
+
+bool UFluid2DInteractionComponent::IsSubmerged() const
+{
+	return IsSubmergedAt(GetComponentLocation());
+}
+
+bool UFluid2DInteractionComponent::IsSubmergedAt(const FVector& CurrentPosition) const
+{
+	const UFluid2DSubsystem* Fluid2DSys = GetFluid2DSubsystem();
+	if (!Fluid2DSys)
+	{
+		return CurrentPosition.Z < 0;
+	}
+
+	if (TargetSolverTypes.Num() == 0)
+	{
+		for (int32 SolverIndex = 0; SolverIndex < Fluid2DSolverType::Count; ++SolverIndex)
+		{
+			const EFluidSolverType SolverType = Fluid2DSolverType::FromIndex(SolverIndex);
+			if (Fluid2DSys->IsSolverTypeEnabled(SolverType) && CurrentPosition.Z < Fluid2DSys->GetFluidLevel(SolverType))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	for (const EFluidSolverType SolverType : TargetSolverTypes)
+	{
+		if (Fluid2DSys->IsSolverTypeEnabled(SolverType) && CurrentPosition.Z < Fluid2DSys->GetFluidLevel(SolverType))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 UE_ENABLE_OPTIMIZATION_SHIP
+
+EFluidSolverType UFluid2DInteractionComponent::GetFlowSolverType(const UFluid2DSubsystem* Fluid2DSys) const
+{
+	if (Fluid2DSys)
+	{
+		for (int32 SolverIndex = 0; SolverIndex < Fluid2DSolverType::Count; ++SolverIndex)
+		{
+			const EFluidSolverType Candidate = Fluid2DSolverType::FromIndex(SolverIndex);
+			if (TargetSolverTypes.Contains(Candidate) && Fluid2DSys->IsSolverTypeEnabled(Candidate))
+			{
+				return Candidate;
+			}
+		}
+
+		return Fluid2DSys->FluidConfig.GetPrimarySolverType();
+	}
+
+	return EFluidSolverType::ShallowWater;
+}
 
 UFluid2DSubsystem* UFluid2DInteractionComponent::GetFluid2DSubsystem() const
 {
