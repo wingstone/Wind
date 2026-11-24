@@ -66,6 +66,26 @@ Fluid2DSys->FluidConfig.MaskAccumulate.bEnabled = false;
 - **旧字段保持兼容**：`UVScaleOffset` / `Fluid2DMapSizeAndInv` / `Fluid2D{Normal,Height,Velocity}MapTexture`
   指向 `GetPrimarySolverType()`（索引最小的已启用层），旧的单流体材质无需修改。
 
+### 更新时间与帧率无关
+
+每层按 `TimeStep` 做**固定步长**推进：游戏线程把真实经过的时间累加进 `FFluid2DFixedStepAccumulator`，
+凑满一个 `TimeStep` 才向渲染线程排一次模拟，因此模拟速度不随帧率漂移。
+
+- **高帧率跳过**：例如 `TimeStep = 1/60`、帧率 240 fps 时，4 帧里只有 1 帧真正跑模拟；跳过的帧仍会采样
+  上一帧结果，视觉上无差别，但省掉了 compute 开销。
+- **低帧率补充**：帧率低于 `1/TimeStep` 时，一帧内会连续跑多步补上落后的时间。
+- **防雪崩**：单帧最多补 `MaxStepsPerUpdate` 步（默认 4），超出的积压直接丢弃，避免卡顿后陷入越算越慢。
+- **交互按步消费**：`Fluid2DInteractionComponent` 的冲量在跳过的帧里继续累积，只在真正模拟的那一步应用一次，
+  所以低帧率补步不会把冲量重复叠加 `N` 倍。
+- **子步语义**：`SimulationSubsteps` 现在是"一个固定步内细分几次"，每个子步推进 `TimeStep / SimulationSubsteps`，
+  因此只影响精度与开销，不改变模拟速度。
+
+```cpp
+Fluid2DSys->FluidConfig.ShallowWater.TimeStep = 1.0f / 60.0f;  // 每秒 60 次模拟更新，与帧率解耦
+Fluid2DSys->FluidConfig.ShallowWater.MaxStepsPerUpdate = 4;    // 单帧最多补 4 步
+Fluid2DSys->FluidConfig.ShallowWater.SimulationSubsteps = 2;   // 每步细分 2 次（提升稳定性，耗时为 2 倍）
+```
+
 ## 核心组件
 
 ### 1. Fluid2DSubsystem

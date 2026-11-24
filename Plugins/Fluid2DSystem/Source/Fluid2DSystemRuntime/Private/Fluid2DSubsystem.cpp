@@ -63,6 +63,7 @@ void UFluid2DSubsystem::Tick(float DeltaTime)
 	ScrollWorldGrid();
 	UpdateInteractions();
 	UpdateGlobalFlow();
+	UpdateSolverStepRequests(DeltaTime);
 }
 
 TStatId UFluid2DSubsystem::GetStatId() const
@@ -215,6 +216,44 @@ void UFluid2DSubsystem::ScrollWorldGrid()
 			});
 
 		LastScrollTargetLocationInts[SolverIndex] = ScrollTargetLocationInt;
+	}
+}
+
+void UFluid2DSubsystem::UpdateSolverStepRequests(float DeltaTime)
+{
+	if (!GetWorld() || !GetWorld()->Scene || DeltaTime <= 0.0f)
+	{
+		return;
+	}
+
+	for (int32 SolverIndex = 0; SolverIndex < Fluid2DSolverType::Count; ++SolverIndex)
+	{
+		const EFluidSolverType SolverType = Fluid2DSolverType::FromIndex(SolverIndex);
+
+		if (!FluidConfig.IsSolverTypeEnabled(SolverType))
+		{
+			PendingSteps[SolverIndex].Reset();
+			continue;
+		}
+
+		const FFluid2DSolverConfigBase& LayerConfig = FluidConfig.GetSolverConfig(SolverType);
+		const int32 NumSteps = PendingSteps[SolverIndex].Accumulate(DeltaTime, LayerConfig.TimeStep, LayerConfig.MaxStepsPerUpdate);
+		if (NumSteps <= 0)
+		{
+			continue;
+		}
+
+		ENQUEUE_RENDER_COMMAND(Fluid2DRequestSolverSteps)(
+		[WorldScene = GetWorld()->Scene, SolverType, NumSteps](FRHICommandListImmediate& RHICmdList)
+			{
+				if (WorldScene->GetRenderScene())
+				{
+					if (FFluid2DFieldSceneExtension* SceneExtension = WorldScene->GetRenderScene()->GetExtensionPtr<FFluid2DFieldSceneExtension>())
+					{
+						SceneExtension->RequestSolverSteps_RenderThread(SolverType, NumSteps);
+					}
+				}
+			});
 	}
 }
 
@@ -409,6 +448,11 @@ FVector2D UFluid2DSubsystem::GetFlowVelocityAt(const FVector& WorldPos, EFluidSo
 
 void UFluid2DSubsystem::ResetState()
 {
+	for (FFluid2DFixedStepAccumulator& PendingStep : PendingSteps)
+	{
+		PendingStep.Reset();
+	}
+
 	if (GetWorld() && GetWorld()->Scene)
 	{
 		ENQUEUE_RENDER_COMMAND(UFluid2DSubsystem_ResetState)(

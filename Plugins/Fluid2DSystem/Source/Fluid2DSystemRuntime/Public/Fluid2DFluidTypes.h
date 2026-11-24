@@ -89,11 +89,15 @@ struct FFluid2DSolverConfigBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "100"))
 	float WorldSize = 10000.0f;
 
-	/** Simulation time step (seconds) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.0", ClampMax = "0.1"))
+	/** Fixed simulation step (seconds). The layer advances in fixed steps of this size, so the update rate is frame-rate independent. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "0.001", ClampMax = "0.1"))
 	float TimeStep = 0.016f;
 
-	/** Simulation quality (substeps per frame) */
+	/** Maximum number of fixed steps simulated in a single frame. Frames that need more drop the excess backlog so a hitch cannot snowball. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "1", ClampMax = "16", UIMin = "1", UIMax = "8"))
+	int32 MaxStepsPerUpdate = 4;
+
+	/** Simulation quality: substeps performed inside one fixed step. Each substep advances TimeStep / SimulationSubsteps. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation", meta = (ClampMin = "1", ClampMax = "10"))
 	int32 SimulationSubsteps = 1;
 

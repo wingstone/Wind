@@ -6,6 +6,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "UObject/UnrealType.h"
 #include "Fluid2DFluidTypes.h"
+#include "Fluid2DSimulationStep.h"
 #include "Fluid2DSubsystem.generated.h"
 
 class FFluid2DFieldSceneExtension;
@@ -89,6 +90,9 @@ private:
 
 	FIntVector2 LastScrollTargetLocationInts[Fluid2DSolverType::Count];
 
+	/** Real time accumulated per layer and not yet converted into a fixed simulation step. */
+	FFluid2DFixedStepAccumulator PendingSteps[Fluid2DSolverType::Count];
+
 	/** Compute the world-space location the simulation is sampling around this frame (player pawn / camera / last rendered view). */
 	FVector GetSampleLocation() const;
 
@@ -99,6 +103,13 @@ private:
 	AFluid2DFlowVolume* ResolveFlowVolumeAt(const FVector& WorldPos, EFluidSolverType SolverType, float& OutBlendWeight) const;
 
 	void ScrollWorldGrid();
+
+	/**
+	 * Converts the elapsed real time of this frame into whole fixed steps per layer and queues them on the
+	 * render thread. Ties the simulation update rate to TimeStep instead of the frame rate: a high frame rate
+	 * queues no step on most frames, a low frame rate queues several so the simulation keeps up with real time.
+	 */
+	void UpdateSolverStepRequests(float DeltaTime);
 
 	/** Update fluid configuration on render thread */
 	void UpdateFluidConfig();

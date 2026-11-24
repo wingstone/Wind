@@ -103,6 +103,7 @@ void FFluid2DSolverLayer::ReleaseResources()
 	WorldGridCenter = FVector2f::ZeroVector;
 	GridScrollOffset = FIntVector2::ZeroValue;
 	GlobalFlowData = FFluid2DGlobalFlowData();
+	PendingStepCount = 0;
 }
 
 void FFluid2DFieldSceneExtension::InitExtension(FScene& InScene)
@@ -138,13 +139,31 @@ void FFluid2DFieldSceneExtension::SetConfig_RenderThread(const FFluid2DFluidConf
 void FFluid2DFieldSceneExtension::SetScrollOffset_RenderThread(EFluidSolverType SolverType, const FIntVector2& NewGridScrollOffset)
 {
 	check(IsInRenderingThread());
-	SolverLayers[Fluid2DSolverType::ToIndex(SolverType)].GridScrollOffset = NewGridScrollOffset;
+	// Accumulate instead of assigning: when the layer skips frames the pending scroll has to survive
+	// until the next simulated step, otherwise the grid centre would drift away from the real view.
+	SolverLayers[Fluid2DSolverType::ToIndex(SolverType)].GridScrollOffset += NewGridScrollOffset;
 }
 
 void FFluid2DFieldSceneExtension::SetInteractionsToApply_RenderThread(const TArray<FFluid2DInteractionData>& InteractionsToApply)
 {
 	check(IsInRenderingThread());
 	CurrentInteractions.Append(InteractionsToApply);
+}
+
+void FFluid2DFieldSceneExtension::RequestSolverSteps_RenderThread(EFluidSolverType SolverType, int32 NumSteps)
+{
+	check(IsInRenderingThread());
+
+	if (NumSteps <= 0)
+	{
+		return;
+	}
+
+	FFluid2DSolverLayer& Layer = SolverLayers[Fluid2DSolverType::ToIndex(SolverType)];
+	const int32 MaxPendingSteps = FMath::Max(CurrentConfig.GetSolverConfig(SolverType).MaxStepsPerUpdate, 1);
+
+	// Cap the queue so a stalled render thread cannot build up an unbounded catch-up burst.
+	Layer.PendingStepCount = FMath::Min(Layer.PendingStepCount + NumSteps, MaxPendingSteps);
 }
 
 void FFluid2DFieldSceneExtension::SetGlobalFlowData_RenderThread(EFluidSolverType SolverType, const FFluid2DGlobalFlowData& InFlowData)
@@ -292,7 +311,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ApplyScroll_RenderThread(FRDGBuilder
 	}
 }
 
-void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FSWFluidConfig& Config)
+void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FSWFluidConfig& Config, TArrayView<const FFluid2DInteractionData> Interactions, float StepDeltaTime)
 {
 	check(IsInRenderingThread());
 
@@ -308,6 +327,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThre
 	const uint32 GridSize = FMath::Max(Config.GridSize, 1);
 	const float CellSize = Config.WorldSize / static_cast<float>(GridSize);
 	const FVector2f GridOrigin(Layer.WorldGridCenter - FVector2f(0.5f * Config.WorldSize));
+	const float SubstepDeltaTime = StepDeltaTime / static_cast<float>(FMath::Max(Config.SimulationSubsteps, 1));
 	const FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(FIntPoint(GridSize, GridSize), FIntPoint(16, 16));
 
 
@@ -320,12 +340,12 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThre
 	}
  
 	// 1) Apply interaction impulses to current fields.
-	if (SceneData->CurrentInteractions.Num() > 0)
+	if (Interactions.Num() > 0)
 	{
 		FFluid2DInteractionApplicationCS::FPermutationDomain PermutationVector;
 		PermutationVector.Set< FFluid2DInteractionApplicationCS::FApplyVelocity >(false);
 		auto InteractionCS = GlobalShaderMap->GetShader<FFluid2DInteractionApplicationCS>(PermutationVector);
-		for (const FFluid2DInteractionData& Interaction : SceneData->CurrentInteractions)
+		for (const FFluid2DInteractionData& Interaction : Interactions)
 		{
 			if (!Interaction.AppliesTo(SolverType))
 			{
@@ -372,7 +392,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThre
 				Parameters->GridSize = GridSize;
 				Parameters->CellSize = CellSize;
 				Parameters->GridOrigin = GridOrigin;
-				Parameters->DeltaTime = Config.TimeStep;
+				Parameters->DeltaTime = SubstepDeltaTime;
 				Parameters->AdvectionDamping = FMath::Clamp(Config.AdvectionDamping, 0.0f, 1.0f);
 				Parameters->FlowNoiseIntensityMin = Layer.GlobalFlowData.FlowNoiseIntensityMin;
 				Parameters->FlowNoiseIntensityMax = Layer.GlobalFlowData.FlowNoiseIntensityMax;
@@ -402,7 +422,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThre
 				Parameters->GridSize = GridSize;
 				Parameters->CellSize = CellSize;
 				Parameters->GridOrigin = GridOrigin;
-				Parameters->DeltaTime = Config.TimeStep;
+				Parameters->DeltaTime = SubstepDeltaTime;
 				Parameters->AdvectionDamping = FMath::Clamp(Config.AdvectionDamping, 0.0f, 1.0f);
 				Parameters->FlowNoiseIntensityMin = Layer.GlobalFlowData.FlowNoiseIntensityMin;
 				Parameters->FlowNoiseIntensityMax = Layer.GlobalFlowData.FlowNoiseIntensityMax;
@@ -457,9 +477,6 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThre
 				
 			Layer.CurrentHeightIndex = (Layer.CurrentHeightIndex + 1) % 3;
 		}
-
-		// 将Layer.HeightFieldRT[i]设为全局srv
-		GraphBuilder.UseExternalAccessMode(HeightRefs[Layer.CurrentHeightIndex], ERHIAccess::SRVMask, ERHIPipeline::All);
 	}
 
 	// 4) Convert solved height field to packed normal XY (RG16F).
@@ -481,12 +498,10 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteShallowWaterSolver_RenderThre
 			HeightToNormalCS,
 			Parameters,
 			GroupCount);
-			
-		GraphBuilder.UseExternalAccessMode(NormalOutput, ERHIAccess::SRVMask, ERHIPipeline::All);
 	}
 }
 
-void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FNSFluidConfig& Config)
+void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FNSFluidConfig& Config, TArrayView<const FFluid2DInteractionData> Interactions, float StepDeltaTime)
 {
 	check(IsInRenderingThread());
 
@@ -526,7 +541,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 		const TShaderMapRef<FNSAdvectionCS> AdvectionCS(GlobalShaderMap);
 		FNSAdvectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSAdvectionCS::FParameters>();
 		Parameters->GridSize = GridSize;
-		Parameters->DeltaTime = Config.TimeStep;
+		Parameters->DeltaTime = StepDeltaTime;
 		Parameters->CellSize = CellSize;
 		Parameters->Damping = FMath::Clamp(Config.Damping, 0.0f, 1.0f);
 		Parameters->FlowNoiseIntensityMin = Layer.GlobalFlowData.FlowNoiseIntensityMin;
@@ -555,12 +570,12 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 	}
 
 	// 1) Apply interaction impulses
-	if (SceneData->CurrentInteractions.Num() > 0)
+	if (Interactions.Num() > 0)
 	{
 		FFluid2DInteractionApplicationCS::FPermutationDomain PermutationVector;
 		PermutationVector.Set< FFluid2DInteractionApplicationCS::FApplyVelocity >(true);
 		auto InteractionCS = GlobalShaderMap->GetShader<FFluid2DInteractionApplicationCS>(PermutationVector);
-		for (const FFluid2DInteractionData& Interaction : SceneData->CurrentInteractions)
+		for (const FFluid2DInteractionData& Interaction : Interactions)
 		{
 			if (!Interaction.AppliesTo(SolverType))
 			{
@@ -631,7 +646,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 			const TShaderMapRef<FNSVorticityConfinementCS> VorticityConfinementCS(GlobalShaderMap);
 			FNSVorticityConfinementCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSVorticityConfinementCS::FParameters>();
 			Parameters->GridSize = GridSize;
-			Parameters->DeltaTime = Config.TimeStep;
+			Parameters->DeltaTime = StepDeltaTime;
 			Parameters->CellSize = CellSize;
 			Parameters->VorticityEpsilon = Config.VorticityConfinement;
 			Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[Layer.CurrentVelocityIndex]);
@@ -670,7 +685,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 		{
 			FNSDiffusionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSDiffusionCS::FParameters>();
 			Parameters->GridSize = GridSize;
-			Parameters->DeltaTime = Config.TimeStep;
+			Parameters->DeltaTime = StepDeltaTime;
 			Parameters->CellSize = CellSize;
 			Parameters->Viscosity = Config.Viscosity;
 			Parameters->OriginalVelocityField = GraphBuilder.CreateSRV(VelocityRefs[Layer.CurrentVelocityIndex]);
@@ -729,7 +744,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 		{
 			FNSPressureSolveCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSPressureSolveCS::FParameters>();
 			Parameters->GridSize = GridSize;
-			Parameters->DeltaTime = Config.TimeStep;
+			Parameters->DeltaTime = StepDeltaTime;
 			Parameters->CellSize = CellSize;
 			Parameters->PressureField = GraphBuilder.CreateSRV(PressurePing);
 			Parameters->DivergenceField = GraphBuilder.CreateSRV(DivergenceRef);
@@ -755,7 +770,7 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 		const TShaderMapRef<FNSProjectionCS> ProjectionCS(GlobalShaderMap);
 		FNSProjectionCS::FParameters* Parameters = GraphBuilder.AllocParameters<FNSProjectionCS::FParameters>();
 		Parameters->GridSize = GridSize;
-		Parameters->DeltaTime = Config.TimeStep;
+		Parameters->DeltaTime = StepDeltaTime;
 		Parameters->CellSize = CellSize;
 		Parameters->VelocityField = GraphBuilder.CreateSRV(VelocityRefs[Layer.CurrentVelocityIndex]);
 		Parameters->PressureField = GraphBuilder.CreateSRV(PressureRef);
@@ -803,15 +818,10 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteNavierStokesSolver_RenderThre
 			Parameters,
 			GroupCount);
 
-		GraphBuilder.UseExternalAccessMode(OutputVelocityRef, ERHIAccess::SRVMask, ERHIPipeline::All);
 	}
-
-	// 将Layer.VelocityFieldRT[i]和Layer.HeightFieldRT[i]设为全局srv
-	GraphBuilder.UseExternalAccessMode(VelocityRefs[Layer.CurrentVelocityIndex], ERHIAccess::SRVMask, ERHIPipeline::All);
-	GraphBuilder.UseExternalAccessMode(HeightRefs[Layer.CurrentHeightIndex], ERHIAccess::SRVMask, ERHIPipeline::All);
 }
 
-void FFluid2DFieldSceneExtension::FUpdater::ExecuteMaskAccumulateSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FMAFluidConfig& Config)
+void FFluid2DFieldSceneExtension::FUpdater::ExecuteMaskAccumulateSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FMAFluidConfig& Config, TArrayView<const FFluid2DInteractionData> Interactions)
 {
 	check(IsInRenderingThread());
 
@@ -837,12 +847,12 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteMaskAccumulateSolver_RenderTh
 	}
  
 	// 1) Apply interaction impulses to current fields.
-	if (SceneData->CurrentInteractions.Num() > 0)
+	if (Interactions.Num() > 0)
 	{
 		FFluid2DInteractionApplicationCS::FPermutationDomain PermutationVector;
 		PermutationVector.Set< FFluid2DInteractionApplicationCS::FApplyVelocity >(false);
 		auto InteractionCS = GlobalShaderMap->GetShader<FFluid2DInteractionApplicationCS>(PermutationVector);
-		for (const FFluid2DInteractionData& Interaction : SceneData->CurrentInteractions)
+		for (const FFluid2DInteractionData& Interaction : Interactions)
 		{
 			if (!Interaction.AppliesTo(SolverType))
 			{
@@ -927,6 +937,8 @@ void FFluid2DFieldSceneExtension::FUpdater::ExecuteMaskAccumulateSolver_RenderTh
 void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePreUpdateChangeSet& ChangeSet)
 {
 	const FFluid2DFluidConfig& FluidConfig = SceneData->CurrentConfig;
+	const TArrayView<const FFluid2DInteractionData> AllInteractions(SceneData->CurrentInteractions);
+	bool bInteractionsConsumed = false;
 
 	// Solver types coexist: every enabled one runs on its own layer, with its own grid and parameters.
 	for (int32 SolverIndex = 0; SolverIndex < Fluid2DSolverType::Count; ++SolverIndex)
@@ -944,17 +956,64 @@ void FFluid2DFieldSceneExtension::FUpdater::PreSceneUpdate(FRDGBuilder& GraphBui
 
 		EnsureLayerResources_RenderThread(GraphBuilder, Layer, SolverType, LayerConfig);
 
+		// The game thread converts elapsed real time into whole fixed steps, so a high frame rate
+		// runs zero steps here while a low frame rate runs several to catch up.
+		const int32 NumSteps = Layer.PendingStepCount;
+		Layer.PendingStepCount = 0;
+
+		if (NumSteps <= 0)
+		{
+			continue;
+		}
+
+		// Scroll is quantized per step, so it is applied once before the first step of this frame.
 		if (Layer.GridScrollOffset != FIntVector2::ZeroValue)
 		{
 			ApplyScroll_RenderThread(GraphBuilder, Layer, LayerConfig, FIntPoint(Layer.GridScrollOffset.X, Layer.GridScrollOffset.Y));
 			Layer.GridScrollOffset = FIntVector2::ZeroValue;
 		}
 
-		ExecuteSolver_RenderThread(GraphBuilder, Layer, SolverType);
-	}
+		const float StepDeltaTime = FMath::Max(LayerConfig.TimeStep, 1e-4f);
 
-	// Every enabled layer above consumed the pending interactions.
-	SceneData->CurrentInteractions.Reset();
+		for (int32 StepIndex = 0; StepIndex < NumSteps; ++StepIndex)
+		{
+			// Interactions are impulses gathered since the previous simulated step: applying them to every
+			// catch-up step would multiply their strength at a low frame rate.
+			const TArrayView<const FFluid2DInteractionData> StepInteractions = StepIndex == 0 ? AllInteractions : TArrayView<const FFluid2DInteractionData>();
+			ExecuteSolver_RenderThread(GraphBuilder, Layer, SolverType, StepInteractions, StepDeltaTime);
+		}
+
+		bInteractionsConsumed = bInteractionsConsumed || AllInteractions.Num() > 0;
+
+		// Mark the simulated fields as externally readable only after every catch-up step ran: doing it inside
+		// the solver would lock them to SRV access and trip RDG validation when the next step writes them again.
+		const auto MarkFieldReadable = [&GraphBuilder](TRefCountPtr<IPooledRenderTarget>& RenderTarget, const TCHAR* DebugName)
+		{
+			if (RenderTarget.IsValid())
+			{
+				GraphBuilder.UseExternalAccessMode(GraphBuilder.RegisterExternalTexture(RenderTarget, DebugName), ERHIAccess::SRVMask, ERHIPipeline::All);
+			}
+		};
+
+		// Height / normal / velocity are the fields materials sample; invalid ones are skipped by the lambda.
+		MarkFieldReadable(Layer.GetCurrentHeightField(), TEXT("Fluid2D.Height.Current"));
+		MarkFieldReadable(Layer.GetNormalField(), TEXT("Fluid2D.Normal.Current"));
+		if (Layer.OutputVelocityFieldRT)
+		{
+			MarkFieldReadable(Layer.OutputVelocityFieldRT, TEXT("Fluid2D.OutputVelocity.Current"));
+		}
+		else
+		{
+			MarkFieldReadable(Layer.VelocityFieldRT[Layer.CurrentVelocityIndex], TEXT("Fluid2D.Velocity.Current"));
+		}
+	}
+	
+	// Interactions are only dropped once a step actually simulated them, so impulses reaching the scene
+	// during skipped frames are kept instead of being thrown away.
+	if (bInteractionsConsumed)
+	{
+		SceneData->CurrentInteractions.Reset();
+	}
 }
 
 void FFluid2DFieldSceneExtension::FUpdater::EnsureLayerResources_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, EFluidSolverType SolverType, const FFluid2DSolverConfigBase& Config)
@@ -1007,20 +1066,20 @@ void FFluid2DFieldSceneExtension::FUpdater::EnsureLayerResources_RenderThread(FR
 	}
 }
 
-void FFluid2DFieldSceneExtension::FUpdater::ExecuteSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, EFluidSolverType SolverType)
+void FFluid2DFieldSceneExtension::FUpdater::ExecuteSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, EFluidSolverType SolverType, TArrayView<const FFluid2DInteractionData> Interactions, float StepDeltaTime)
 {
 	const FFluid2DFluidConfig& FluidConfig = SceneData->CurrentConfig;
 
 	switch (SolverType)
 	{
 	case EFluidSolverType::ShallowWater:
-		ExecuteShallowWaterSolver_RenderThread(GraphBuilder, Layer, FluidConfig.ShallowWater);
+		ExecuteShallowWaterSolver_RenderThread(GraphBuilder, Layer, FluidConfig.ShallowWater, Interactions, StepDeltaTime);
 		break;
 	case EFluidSolverType::NavierStokes:
-		ExecuteNavierStokesSolver_RenderThread(GraphBuilder, Layer, FluidConfig.NavierStokes);
+		ExecuteNavierStokesSolver_RenderThread(GraphBuilder, Layer, FluidConfig.NavierStokes, Interactions, StepDeltaTime);
 		break;
 	case EFluidSolverType::MaskAccumulate:
-		ExecuteMaskAccumulateSolver_RenderThread(GraphBuilder, Layer, FluidConfig.MaskAccumulate);
+		ExecuteMaskAccumulateSolver_RenderThread(GraphBuilder, Layer, FluidConfig.MaskAccumulate, Interactions);
 		break;
 	default:
 		break;

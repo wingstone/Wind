@@ -41,6 +41,9 @@ struct FLUID2DSYSTEMRUNTIME_API FFluid2DSolverLayer
 	/** Flow volume / noise state applied to this layer. */
 	FFluid2DGlobalFlowData GlobalFlowData;
 
+	/** Fixed steps requested by the game thread and not simulated yet (consumed by PreSceneUpdate_RenderThread). */
+	int32 PendingStepCount = 0;
+
 	/** Releases every render target owned by the layer and resets the ping-pong indices. */
 	void ReleaseResources();
 
@@ -79,17 +82,17 @@ public:
 		virtual void PostSceneUpdate(FRDGBuilder& GraphBuilder, const FScenePostUpdateChangeSet& ChangeSet) override;
 		//~ End ISceneExtensionUpdater Interface.
  
-		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FSWFluidConfig& Config);
-		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FNSFluidConfig& Config);
-		void ExecuteMaskAccumulateSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FMAFluidConfig& Config);
+		void ExecuteShallowWaterSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FSWFluidConfig& Config, TArrayView<const FFluid2DInteractionData> Interactions, float StepDeltaTime);
+		void ExecuteNavierStokesSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FNSFluidConfig& Config, TArrayView<const FFluid2DInteractionData> Interactions, float StepDeltaTime);
+		void ExecuteMaskAccumulateSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FMAFluidConfig& Config, TArrayView<const FFluid2DInteractionData> Interactions);
 		void ApplyScroll_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, const FFluid2DSolverConfigBase& Config, const FIntPoint& TexelOffset);
 
 	private:
 		/** Creates the render targets the given solver type needs (if missing) and clears the new ones. */
 		void EnsureLayerResources_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, EFluidSolverType SolverType, const FFluid2DSolverConfigBase& Config);
 
-		/** Dispatches the solver matching SolverType on the given layer. */
-		void ExecuteSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, EFluidSolverType SolverType);
+		/** Dispatches the solver matching SolverType on the given layer for one fixed step. */
+		void ExecuteSolver_RenderThread(FRDGBuilder& GraphBuilder, FFluid2DSolverLayer& Layer, EFluidSolverType SolverType, TArrayView<const FFluid2DInteractionData> Interactions, float StepDeltaTime);
 
 		FFluid2DFieldSceneExtension* SceneData;
 	};
@@ -124,6 +127,13 @@ public:
 	void SetConfig_RenderThread(const FFluid2DFluidConfig& NewConfig);
 	void SetScrollOffset_RenderThread(EFluidSolverType SolverType, const FIntVector2& NewGridScrollOffset);
 	void SetInteractionsToApply_RenderThread(const TArray<FFluid2DInteractionData>& InteractionsToApply);
+
+	/**
+	 * Queues NumSteps fixed simulation steps for a layer. The game thread converts elapsed real time into
+	 * whole steps, so the update rate follows TimeStep instead of the frame rate.
+	 */
+	void RequestSolverSteps_RenderThread(EFluidSolverType SolverType, int32 NumSteps);
+
 	void SetGlobalFlowData_RenderThread(EFluidSolverType SolverType, const FFluid2DGlobalFlowData& InFlowData);
 	void ResetState_RenderThread(FRHICommandListImmediate& RHICmdList);
 
